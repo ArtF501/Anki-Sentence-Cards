@@ -45,7 +45,7 @@ def test_format_matches_sample_card(net):
 
 def test_parser_takes_first_translation_only():
     html = (FIX / "reverso_contemporary.html").read_bytes()
-    assert meaning._parse_reverso(html) == "modern time\tсовременник"
+    assert meaning._parse_reverso(html) == ("modern time", "современник")
 
 
 @pytest.mark.parametrize("page", [
@@ -105,3 +105,44 @@ def test_all_sources_dead_raises_source_error(net):
 def test_empty_word_raises(net):
     with pytest.raises(SourceError):
         get_meaning("  ", "", ENTRY)
+
+
+def _page(inner):
+    return ('<div id="translations-content">%s</div>' % inner).encode("utf-8")
+
+
+def test_parser_nested_span_does_not_truncate_term():
+    html = _page('<a class="translation"><span class="display-term">совре<span>менн</span>ик</span></a>')
+    assert meaning._parse_reverso(html) == ("", "современник")
+
+
+def test_parser_unclosed_anchor_does_not_glue_terms():
+    html = _page('<a class="translation"><span class="display-term">современник</span>'
+                 '<a class="translation"><span class="display-term">современный</span></a>')
+    assert meaning._parse_reverso(html) == ("", "современник")
+
+
+@pytest.mark.parametrize("term", ["слово2", "я" * 61])
+def test_parser_rejects_digits_and_overlong_term(term):
+    html = _page('<a class="translation"><span class="display-term">%s</span></a>' % term)
+    with pytest.raises(SourceError):
+        meaning._parse_reverso(html)
+
+
+def test_fallback_rejects_untranslated_latin(net):
+    net["page"] = SourceError("down")
+    net["tr"] = "contemporary"
+    with pytest.raises(SourceError):
+        get_meaning("contemporary", "", ENTRY)
+
+
+def test_fallback_rejects_overlong_translation(net):
+    net["page"] = SourceError("down")
+    net["tr"] = "я" * 61
+    with pytest.raises(SourceError):
+        get_meaning("w", "", ENTRY)
+
+
+def test_reverso_path_with_empty_definition_and_no_entry(net):
+    assert get_meaning("w", "", DictEntry("noun", "", "")).text == "(modern time) современник"
+    assert get_meaning("w", "", None).text == "(modern time) современник"

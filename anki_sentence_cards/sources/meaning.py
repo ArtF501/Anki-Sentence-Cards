@@ -8,7 +8,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from html.parser import HTMLParser
-from typing import Optional
+from typing import Optional, Tuple
 from urllib.parse import quote
 
 from . import http, translate
@@ -28,15 +28,23 @@ class Meaning:
     source: str
 
 
+def _plausible(text: str) -> bool:
+    """Shared sanity check for a Russian translation, whichever source gave it."""
+    return bool(_CYRILLIC.search(text)) and not _BAD.search(text) and len(text) <= 60
+
+
 class _Reverso(HTMLParser):
-    """Collects the first translation anchor inside #translations-content."""
+    """Collects the first term (and hint) of the first translation anchor."""
 
     def __init__(self):
         super().__init__()
         self.depth_content = 0
         self.in_anchor = False
         self.done = False
-        self.field = None
+        self.field = None      # "term" / "hint" while inside that span
+        self.span_depth = 0    # nesting inside the current field span
+        self.term_done = False
+        self.hint_done = False
         self.term = ""
         self.hint = ""
 
@@ -47,18 +55,29 @@ class _Reverso(HTMLParser):
             self.depth_content += 1
         if not self.depth_content or self.done:
             return
-        if tag == "a" and "translation" in classes and not self.in_anchor:
+        if self.field:
+            if tag == "span":
+                self.span_depth += 1
+        elif tag == "a" and "translation" in classes:
+            if self.in_anchor:  # previous anchor never closed
+                self.done = True
             self.in_anchor = True
         elif self.in_anchor and tag == "span":
-            if "display-term" in classes:
-                self.field = "term"
-            elif "context-hint" in classes:
-                self.field = "hint"
+            if "display-term" in classes and not self.term_done:
+                self.field, self.span_depth = "term", 1
+            elif "context-hint" in classes and not self.hint_done:
+                self.field, self.span_depth = "hint", 1
 
     def handle_endtag(self, tag):
-        if tag == "span":
-            self.field = None
-        elif tag == "a" and self.in_anchor:
+        if tag == "span" and self.field:
+            self.span_depth -= 1
+            if self.span_depth == 0:
+                if self.field == "term":
+                    self.term_done = True
+                else:
+                    self.hint_done = True
+                self.field = None
+        elif tag == "a" and self.in_anchor and not self.field:
             self.in_anchor = False
             self.done = True
         elif tag == "div" and self.depth_content:
@@ -72,8 +91,8 @@ class _Reverso(HTMLParser):
                 self.hint += data
 
 
-def _parse_reverso(html: bytes) -> str:
-    """Reverso page -> "hint\\ttranslation" (hint may be empty).
+def _parse_reverso(html: bytes) -> Tuple[str, str]:
+    """Reverso page -> (hint, translation); hint may be empty.
 
     The only place that knows Reverso's layout. Raises SourceError on any
     unrecognised or implausible result instead of returning junk.
@@ -86,11 +105,11 @@ def _parse_reverso(html: bytes) -> str:
         raise SourceError("Reverso: не удалось разобрать страницу")
     term = " ".join(p.term.split())
     hint = " ".join(p.hint.split())
-    if not term or not _CYRILLIC.search(term) or _BAD.search(term) or len(term) > 60:
+    if not _plausible(term):
         raise SourceError("Reverso: вёрстка не распознана")
     if _BAD.search(hint) or len(hint) > 40:
         hint = ""
-    return hint + "\t" + term
+    return hint, term
 
 
 def _compose(hint: str, definition: str, translation: str) -> str:
@@ -109,13 +128,13 @@ def _fallback_hint(definition: str) -> str:
 
 def _reverso(word: str, definition: str) -> str:
     html = http.get_bytes(URL + quote(word, safe=""))
-    hint, _, term = _parse_reverso(html).partition("\t")
+    hint, term = _parse_reverso(html)
     return _compose(hint, definition, term)
 
 
 def _fallback(word: str, deepl_key: str, definition: str) -> str:
     tr = translate.translate(word, deepl_key).text.strip()
-    if not tr or _BAD.search(tr):
+    if not _plausible(tr):
         raise SourceError("перевод слова непригоден")
     return _compose(_fallback_hint(definition), definition, tr)
 
