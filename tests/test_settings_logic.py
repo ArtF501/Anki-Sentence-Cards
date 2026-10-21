@@ -1,4 +1,4 @@
-from anki_sentence_cards.notes import mappable_fields, plan_field_map, resolve_field_map
+from anki_sentence_cards.notes import mappable_fields, settle_field_map, resolve_field_map
 from anki_sentence_cards.settings import (
     NOT_FILLED, Settings, add_book, build_field_map, load_settings, merge_for_save,
     normalize_active, remove_book, to_dict,
@@ -76,28 +76,45 @@ def test_not_filled_survives_save_and_reload():
     assert resolved["front"] == "Front"
 
 
-def test_plan_keeps_map_for_same_notetype_even_when_first_run():
-    saved = {"front": "Front", "ipa": ""}
-    keep, unresolved = plan_field_map(FIELDS, saved, "A", "A")
-    assert keep == saved and unresolved == []
+MAP_A = {"front": "Front", "ipa": ""}
 
 
-def test_plan_manual_map_on_first_run_not_wiped():
-    # first run: settings notetype is "", user picks A, maps manually,
-    # caller records map_notetype = A, then saves
-    saved = {"front": "Front"}
-    keep, _ = plan_field_map(FIELDS, saved, "A", "A")
-    assert keep == saved
+def test_settle_cancel_on_other_type_keeps_all_maps():
+    maps = {"A": MAP_A}
+    out = settle_field_map(["Other"], maps, "B", True, lambda cur: None)
+    assert out == {"A": MAP_A}          # back to A: map still there
 
 
-def test_plan_drops_map_of_other_notetype():
-    keep, _ = plan_field_map(FIELDS, {"front": "Zzz"}, "A", "B")
-    assert keep == {}
+def test_settle_choice_stored_for_that_type_only():
+    out = settle_field_map(FIELDS, {"A": MAP_A}, "B", True, lambda cur: {"front": "Front"})
+    assert out == {"A": MAP_A, "B": {"front": "Front"}}
 
 
-def test_plan_reports_unresolved_front():
-    _, unresolved = plan_field_map(["Other"], {}, "A", "A")
-    assert "front" in unresolved
+def test_settle_first_run_manual_map_kept():
+    out = settle_field_map(FIELDS, {}, "A", True, lambda cur: {"front": "Front"})
+    assert out["A"] == {"front": "Front"}
+
+
+def test_settle_no_prompt_when_resolved_and_not_forced():
+    def boom(cur):
+        raise AssertionError("must not ask")
+    assert settle_field_map(FIELDS, {"A": MAP_A}, "A", False, boom) == {"A": MAP_A}
+
+
+def test_settle_prompts_on_unresolved_and_passes_current():
+    seen = []
+    settle_field_map(["Other"], {"A": MAP_A}, "A", False, lambda cur: seen.append(cur))
+    assert seen == [MAP_A]
+
+
+def test_settle_does_not_mutate_input():
+    maps = {"A": MAP_A}
+    settle_field_map(FIELDS, maps, "B", True, lambda cur: {"front": "Front"})
+    assert maps == {"A": MAP_A}
+
+
+def test_load_settings_infinite_limit():
+    assert load_settings({"occurrence_limit": float("inf")}).occurrence_limit == 50
 
 
 def test_load_settings_survives_garbage():

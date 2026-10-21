@@ -6,7 +6,7 @@ from aqt.qt import (
 
 from aqt.utils import showWarning
 
-from ..notes import plan_field_map, resolve_field_map
+from ..notes import resolve_field_map, settle_field_map
 from ..settings import (
     add_book, load_settings, merge_for_save, normalize_active, remove_book,
 )
@@ -42,7 +42,8 @@ class SettingsDialog(QDialog):
         self._raw = mw.addonManager.getConfig(_addon(mw)) or {}
         self.s = load_settings(self._raw)
         self.s.active_book = normalize_active(self.s.books, self.s.active_book)
-        self._map_notetype = self.s.notetype  # note type the current field_map was built for
+        # field maps per note type: switching types and back never loses one
+        self._maps = {self.s.notetype: self.s.field_map} if self.s.notetype else {}
 
         root = QVBoxLayout(self)
         root.addWidget(QLabel("Книги (отметьте активную):"))
@@ -126,16 +127,13 @@ class SettingsDialog(QDialog):
         fields = _notetype_fields(self.mw, notetype)
         if fields is None:
             return
-        keep, unresolved = plan_field_map(fields, self.s.field_map, self._map_notetype, notetype)
-        if unresolved or force:
-            chosen = open_field_map(self.mw, fields, keep)
-            if chosen is not None:
-                keep = chosen
-        self.s.field_map = keep
-        self._map_notetype = notetype
+        self._maps = settle_field_map(
+            fields, self._maps, notetype, force, lambda cur: open_field_map(self.mw, fields, cur)
+        )
 
     def _save(self) -> None:
         self._run_field_map(force=False)
+        self.s.field_map = self._maps.get(self._notetype.currentText(), {})
         self.s.deck = self._deck.currentText()
         self.s.notetype = self._notetype.currentText()
         self.s.deepl_key = self._key.text().strip()

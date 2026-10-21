@@ -35,7 +35,7 @@ def load_settings(raw) -> Settings:
     lang = raw.get("tts_lang")
     try:
         limit = int(raw.get("occurrence_limit", d.occurrence_limit))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         limit = d.occurrence_limit
     if isinstance(raw.get("occurrence_limit"), bool) or limit < 1:
         limit = d.occurrence_limit

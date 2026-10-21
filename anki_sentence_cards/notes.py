@@ -40,6 +40,9 @@ def mappable_fields(notetype_fields: List[str]) -> List[str]:
 def resolve_field_map(notetype_fields: List[str], saved: Dict[str, str]) -> Tuple[Dict[str, str], List[str]]:
     """Map logical keys to note field names; return (map, unresolved keys).
 
+    The returned map is the RESOLVED one: pass it (not Settings.field_map,
+    which holds "" markers meaning 'do not fill') to add_note.
+
     Policy for the caller (task 11), checked once before the batch:
     only an unresolved 'front' is fatal (it lands in `unresolved` like any
     other key). Any other unresolved key means: warn the user once, leave
@@ -69,15 +72,22 @@ def resolve_field_map(notetype_fields: List[str], saved: Dict[str, str]) -> Tupl
     return result, unresolved
 
 
-def plan_field_map(fields: List[str], saved: Dict[str, str], map_notetype: str,
-                   new_notetype: str) -> Tuple[Dict[str, str], List[str]]:
-    """Map to keep and unresolved keys for new_notetype.
+def settle_field_map(fields: List[str], maps: Dict[str, Dict[str, str]], notetype: str,
+                     force: bool, ask) -> Dict[str, Dict[str, str]]:
+    """Maps per note type after (maybe) asking the user; returns a new dict.
 
-    A saved map built for another note type is dropped, never reused.
+    `ask(current_map)` returns the chosen map or None if cancelled. It is
+    called when the map for `notetype` has unresolved keys or `force` is
+    set. Cancelling changes nothing, and maps of other note types are never
+    touched, so switching A -> B -> cancel -> A keeps A's map.
     """
-    keep = dict(saved) if map_notetype == new_notetype else {}
-    _, unresolved = resolve_field_map(fields, keep)
-    return keep, unresolved
+    current = maps.get(notetype, {})
+    _, unresolved = resolve_field_map(fields, current)
+    if unresolved or force:
+        chosen = ask(current)
+        if chosen is not None:
+            return {**maps, notetype: chosen}
+    return dict(maps)
 
 
 def note_tags(missing: List[str]) -> List[str]:
