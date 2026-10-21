@@ -1,0 +1,107 @@
+from pathlib import Path
+
+import pytest
+
+from anki_sentence_cards.sources import http, meaning, translate
+from anki_sentence_cards.sources.dictionary import DictEntry
+from anki_sentence_cards.sources.http import SourceError
+from anki_sentence_cards.sources.meaning import Meaning, get_meaning
+
+FIX = Path(__file__).parent / "fixtures"
+DEFN = "person or thing considered modern or current"
+ENTRY = DictEntry("adjective", "x", DEFN)
+
+
+@pytest.fixture
+def net(monkeypatch):
+    s = {"page": (FIX / "reverso_contemporary.html").read_bytes(), "tr": "современник", "gets": []}
+
+    def get_bytes(url, params=None, timeout=10.0):
+        s["gets"].append(url)
+        if isinstance(s["page"], Exception):
+            raise s["page"]
+        return s["page"]
+
+    def tr(text, key, target="RU"):
+        if isinstance(s["tr"], Exception):
+            raise s["tr"]
+        return translate.Translation(s["tr"], "google")
+
+    monkeypatch.setattr(http, "get_bytes", get_bytes)
+    monkeypatch.setattr(translate, "translate", tr)
+    return s
+
+
+def test_reverso_translation_used_when_available(net):
+    m = get_meaning("contemporary", "", ENTRY)
+    assert m.source == "reverso"
+    assert net["gets"] == ["https://context.reverso.net/translation/english-russian/contemporary"]
+
+
+def test_format_matches_sample_card(net):
+    assert get_meaning("contemporary", "", ENTRY).text == (
+        "(modern time) person or thing considered modern or current - современник")
+
+
+def test_parser_takes_first_translation_only():
+    html = (FIX / "reverso_contemporary.html").read_bytes()
+    assert meaning._parse_reverso(html) == "modern time\tсовременник"
+
+
+@pytest.mark.parametrize("page", [
+    b"<html><body>Just a moment...</body></html>",
+    b"",
+    b'<div id="translations-content"><a class="translation"><span class="display-term">x</span></a></div>',
+    b'<div id="translations-content"><a class="translation"><span class="display-term"></span></a></div>',
+    b'<div id="other"><a class="translation"><span class="display-term">\xd1\x81\xd0\xbb\xd0\xbe\xd0\xb2\xd0\xbe</span></a></div>',
+])
+def test_parser_rejects_unrecognised_layout(page):
+    with pytest.raises(SourceError):
+        meaning._parse_reverso(page)
+
+
+@pytest.mark.parametrize("page", [
+    SourceError("down"), b"<html>changed layout</html>", b""])
+def test_falls_back_to_dictionary_plus_translator_when_reverso_fails(net, page):
+    net["page"] = page
+    m = get_meaning("contemporary", "", ENTRY)
+    assert m.source == "fallback"
+    assert m.text.endswith(DEFN + " - современник")
+
+
+def test_fallback_keeps_the_same_three_part_shape(net):
+    net["page"] = SourceError("down")
+    e = DictEntry("noun", "", "modern period of time")
+    assert get_meaning("w", "", e).text == "(modern period) modern period of time - современник"
+
+
+def test_fallback_omits_parens_without_meaningful_hint(net):
+    net["page"] = SourceError("down")
+    assert get_meaning("w", "", ENTRY).text == DEFN + " - современник"
+    one = DictEntry("noun", "", "Run")
+    assert get_meaning("w", "", one).text == "Run - современник"
+
+
+def test_fallback_survives_empty_definition_and_missing_entry(net):
+    net["page"] = SourceError("down")
+    assert get_meaning("w", "", DictEntry("noun", "", "")).text == "современник"
+    assert get_meaning("w", "", None).text == "современник"
+
+
+def test_fallback_rejects_junk_translation(net):
+    net["page"] = SourceError("down")
+    net["tr"] = "<html>429</html>"
+    with pytest.raises(SourceError):
+        get_meaning("w", "", ENTRY)
+
+
+def test_all_sources_dead_raises_source_error(net):
+    net["page"] = SourceError("down")
+    net["tr"] = SourceError("down")
+    with pytest.raises(SourceError):
+        get_meaning("w", "", ENTRY)
+
+
+def test_empty_word_raises(net):
+    with pytest.raises(SourceError):
+        get_meaning("  ", "", ENTRY)
