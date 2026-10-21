@@ -32,7 +32,13 @@ def _norm(name: str) -> str:
 
 
 def resolve_field_map(notetype_fields: List[str], saved: Dict[str, str]) -> Tuple[Dict[str, str], List[str]]:
-    """Map logical keys to note field names; return (map, unresolved keys)."""
+    """Map logical keys to note field names; return (map, unresolved keys).
+
+    Policy for the caller (task 11), checked once before the batch:
+    only an unresolved 'front' is fatal (it lands in `unresolved` like any
+    other key). Any other unresolved key means: warn the user once, leave
+    that field empty, still create the card.
+    """
     excluded = {_norm(n) for n in _EXCLUDED}
     fields = [f for f in notetype_fields if _norm(f) not in excluded]
     result: Dict[str, str] = {}
@@ -72,11 +78,21 @@ class NoteTypeMissing(NoteError):
 
 
 def check_front(draft: "CardDraft", field_map: Dict[str, str]) -> None:
-    """Refuse a note whose front side would be empty or unmapped."""
+    """Refuse a note whose front side would be empty or unmapped.
+
+    Markup without text ('<b></b>', '<br>', '&nbsp;') counts as empty.
+    """
     if not field_map.get("front"):
         raise NoteError("Поле лицевой стороны (Front) не сопоставлено")
-    if not (draft.values.get("front") or "").strip():
+    text = re.sub(r"<[^>]*>", "", draft.values.get("front") or "")
+    text = text.replace("&nbsp;", " ").replace("\xa0", " ")
+    if not text.strip():
         raise NoteError("Пустая лицевая сторона карточки (Front)")
+
+
+class DuplicateCheckFailed(NoteError):
+    """find_duplicate could not search. Means 'duplicate check is off', not
+    'this word failed'; see find_duplicate for the rule."""
 
 
 def escape_search(text: str) -> str:
@@ -96,14 +112,22 @@ def sync_sound_name(values: Dict[str, str], old: str, new: str) -> None:
 def add_note(col, draft: "CardDraft", deck: str, notetype: str, field_map: Dict[str, str]) -> int:
     """Add the draft as a note and return its id. Audio is written first.
 
-    Raises NoteError (Russian message) for: unknown note type, a field_map
-    entry naming a field the note type no longer has, and Anki refusing the
-    note (e.g. 'front' unmapped or empty). Caller contract (task 11): before
-    the batch, check resolve_field_map's `unresolved` and that the note type
-    exists, once; inside the per-word loop catch NoteError and, as a safety
-    net, Exception. NoteTypeMissing (a NoteError subclass) means stop the
-    whole batch, not mark one word. An empty or unmapped front is refused
-    with NoteError before Anki is touched.
+    Order of checks: check_front first, then the note type. So with an empty
+    front AND a missing note type the caller gets NoteError, not
+    NoteTypeMissing.
+
+    Raises (messages are Russian, user-facing):
+    - NoteError: empty or unmapped front (refused before Anki is touched),
+      a field_map entry naming a field the note type no longer has, or Anki
+      rejecting the note in add_note. Mark this word failed, go on.
+    - NoteTypeMissing (subclass of NoteError): unknown note type. Stop the
+      whole batch. Catch it before plain NoteError.
+    Other Anki calls here (deck, media, new_note) are not wrapped and may
+    raise raw exceptions, so the loop must also catch Exception as a safety
+    net.
+
+    Caller contract: before the batch, once, run resolve_field_map (see its
+    policy) and verify the note type exists.
     """
     check_front(draft, field_map)
     model = col.models.by_name(notetype)
@@ -136,18 +160,19 @@ def find_duplicate(col, deck: str, word: str) -> Optional[int]:
     """Id of a note in the deck whose first field contains the word, else None.
 
     One Anki search prefilters candidates; only they are checked by regex.
-    A failing search raises NoteError: it must not look like 'no duplicate'.
-    Task 11 should catch it, tell the user duplicate detection is off, and
-    decide whether to continue; it is not the same as returning None.
+    Any failure raises DuplicateCheckFailed, never silently None.
+    Caller rule (task 11): on DuplicateCheckFailed warn the user ONCE, turn
+    duplicate checking off for the rest of the batch and continue. Do not
+    stop the batch and do not mark the word failed: a duplicate is an
+    inconvenience, not data corruption.
     """
     query = 'deck:"%s" "%s"' % (escape_search(deck), escape_search(word))
     pattern = re.compile(r"\b%s\b" % re.escape(word), re.IGNORECASE)
     try:
-        ids = col.find_notes(query)
+        for nid in col.find_notes(query):
+            first = col.get_note(nid).fields[0]
+            if pattern.search(re.sub(r"<[^>]+>", "", first)):
+                return nid
     except Exception as e:
-        raise NoteError("Не удалось проверить дубликаты: %s" % e)
-    for nid in ids:
-        first = col.get_note(nid).fields[0]
-        if pattern.search(re.sub(r"<[^>]+>", "", first)):
-            return nid
+        raise DuplicateCheckFailed("Не удалось проверить дубликаты: %s" % e)
     return None

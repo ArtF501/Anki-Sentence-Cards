@@ -1,4 +1,4 @@
-from anki_sentence_cards.notes import DEFAULT_FIELD_NAMES, resolve_field_map, note_tags, escape_search, sync_sound_name, check_front, NoteError, NoteTypeMissing
+from anki_sentence_cards.notes import DEFAULT_FIELD_NAMES, resolve_field_map, note_tags, escape_search, sync_sound_name, check_front, NoteError, NoteTypeMissing, DuplicateCheckFailed
 from anki_sentence_cards.card import CardDraft
 import pytest
 
@@ -81,3 +81,14 @@ def test_check_front():
 
 def test_note_type_missing_is_note_error():
     assert issubclass(NoteTypeMissing, NoteError)
+
+
+def test_check_front_markup_only_is_empty():
+    for v in ("<b></b>", "<br>", "&nbsp;", " <div><br></div> "):
+        with pytest.raises(NoteError):
+            check_front(_draft(v), {"front": "Front"})
+
+
+def test_duplicate_check_failed_is_note_error_not_type_missing():
+    assert issubclass(DuplicateCheckFailed, NoteError)
+    assert not issubclass(DuplicateCheckFailed, NoteTypeMissing)
