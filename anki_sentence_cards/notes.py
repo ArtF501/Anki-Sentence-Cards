@@ -60,30 +60,72 @@ def note_tags(missing: List[str]) -> List[str]:
     return [TAG_ALL] + ([TAG_INCOMPLETE] if missing else [])
 
 
+class NoteError(Exception):
+    """Could not write the note; the message is user-facing (Russian)."""
+
+
+def escape_search(text: str) -> str:
+    """Escape text for use inside a quoted Anki search term."""
+    out = text.replace("\\", "\\\\")
+    for ch in ('"', "*", "_", ":"):
+        out = out.replace(ch, "\\" + ch)
+    return out
+
+
+def sync_sound_name(values: Dict[str, str], old: str, new: str) -> None:
+    """Point values['sound'] at the media name Anki actually used."""
+    if new and new != old and "sound" in values:
+        values["sound"] = values["sound"].replace(old, new)
+
+
 def add_note(col, draft: "CardDraft", deck: str, notetype: str, field_map: Dict[str, str]) -> int:
-    """Add the draft as a note and return its id. Audio is written first."""
+    """Add the draft as a note and return its id. Audio is written first.
+
+    Raises NoteError (Russian message) for: unknown note type, a field_map
+    entry naming a field the note type no longer has, and Anki refusing the
+    note (e.g. 'front' unmapped or empty). Caller contract (task 11): before
+    the batch, check resolve_field_map's `unresolved` and that the note type
+    exists, once; inside the per-word loop catch NoteError and, as a safety
+    net, Exception.
+    """
     model = col.models.by_name(notetype)
     if model is None:
-        raise ValueError("Note type not found: %s" % notetype)
+        raise NoteError("Тип заметки не найден: %s" % notetype)
     deck_id = col.decks.id(deck)
     if draft.audio and draft.audio_name:
-        col.media.write_data(draft.audio_name, draft.audio)
+        written = col.media.write_data(draft.audio_name, draft.audio)
+        if isinstance(written, str):
+            sync_sound_name(draft.values, draft.audio_name, written)
     note = col.new_note(model)
     for key, value in draft.values.items():
         name = field_map.get(key)
         if name:
-            note[name] = value
+            try:
+                note[name] = value
+            except KeyError:
+                raise NoteError("В типе заметки нет поля «%s»" % name)
     for tag in note_tags(draft.missing):
         note.add_tag(tag)
-    col.add_note(note, deck_id)
+    try:
+        col.add_note(note, deck_id)
+    except Exception as e:
+        raise NoteError("Anki не принял заметку (поле Front не сопоставлено или пустое?): %s" % e)
     return note.id
 
 
 def find_duplicate(col, deck: str, word: str) -> Optional[int]:
-    """Id of a note in the deck whose first field contains the word, else None."""
-    query = 'deck:"%s" "%s"' % (deck.replace('"', '\\"'), word.replace('"', '\\"'))
+    """Id of a note in the deck whose first field contains the word, else None.
+
+    One Anki search prefilters candidates; only they are checked by regex.
+    A failing search is treated as 'no duplicate found'.
+    """
+    query = 'deck:"%s" "%s"' % (escape_search(deck), escape_search(word))
     pattern = re.compile(r"\b%s\b" % re.escape(word), re.IGNORECASE)
-    for nid in col.find_notes(query):
+    try:
+        ids = col.find_notes(query)
+    except Exception:
+        return None
+    for nid in ids:
         first = col.get_note(nid).fields[0]
         if pattern.search(re.sub(r"<[^>]+>", "", first)):
             return nid

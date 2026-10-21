@@ -1,4 +1,4 @@
-from anki_sentence_cards.notes import DEFAULT_FIELD_NAMES, resolve_field_map, note_tags
+from anki_sentence_cards.notes import DEFAULT_FIELD_NAMES, resolve_field_map, note_tags, escape_search, sync_sound_name
 
 ALL = ["Front", "Sound of sentence", "Translate", "Type of word",
        "Transcription of word", "Sound of word", "Meaning", "Notes"]
@@ -48,3 +48,18 @@ def test_sound_of_sentence_and_notes_never_in_map():
 def test_tags():
     assert note_tags([]) == ["asc"]
     assert note_tags(["meaning"]) == ["asc", "auto-incomplete"]
+
+
+def test_escape_search():
+    assert escape_search('a\\b') == 'a\\\\b'
+    assert escape_search('say "hi"') == 'say \\"hi\\"'
+    assert escape_search("foo:bar*_") == "foo\\:bar\\*\\_"
+    assert escape_search("plain") == "plain"
+
+
+def test_sync_sound_name():
+    v = {"sound": "[sound:a.mp3]"}
+    sync_sound_name(v, "a.mp3", "a_1.mp3")
+    assert v["sound"] == "[sound:a_1.mp3]"
+    sync_sound_name(v, "a_1.mp3", "a_1.mp3")
+    assert v["sound"] == "[sound:a_1.mp3]"
