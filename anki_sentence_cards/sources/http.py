@@ -48,6 +48,7 @@ def _fetch(url: str, params: Optional[dict], data: Optional[dict],
             with _urlopen(req, timeout) as resp:
                 return resp.read()
         except urllib.error.HTTPError as e:
+            e.close()
             last = "сервис ответил ошибкой %d" % e.code
             if e.code < 500:  # client errors will not fix themselves
                 break

@@ -27,10 +27,13 @@ def parse_deepl(payload) -> str:
 
 
 def parse_google(payload) -> str:
-    try:
-        text = "".join(part[0] for part in payload[0] if part and part[0])
-    except (KeyError, IndexError, TypeError):
-        raise SourceError("Google Translate вернул непонятный ответ")
+    bad = SourceError("Google Translate вернул непонятный ответ")
+    if not isinstance(payload, list) or not payload or not isinstance(payload[0], list):
+        raise bad
+    parts = payload[0]
+    if not all(isinstance(p, list) and p and isinstance(p[0], str) for p in parts):
+        raise bad
+    text = "".join(p[0] for p in parts)
     if not text.strip():
         raise SourceError("Google Translate вернул пустой перевод")
     return text

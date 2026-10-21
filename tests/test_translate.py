@@ -72,3 +72,14 @@ def test_google_malformed_raises_source_error(net):
 def test_parsers_on_recorded_samples():
     assert translate.parse_deepl(DEEPL_OK) == "Привет"
     assert translate.parse_google(GOOGLE_OK) == "Привет, мир"
+
+
+@pytest.mark.parametrize("bad", [["x"], [["ab", "cd"]], "Hello", [[[1, "a"]]], [[[]]], [[]]])
+def test_parse_google_rejects_wrong_shapes(bad):
+    with pytest.raises(http.SourceError):
+        translate.parse_google(bad)
+
+
+def test_whitespace_only_key_goes_to_google(net):
+    assert translate.translate("Hello", deepl_key="  ").engine == "google"
+    assert net["posts"] == []

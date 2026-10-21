@@ -122,3 +122,18 @@ def test_bad_url_raises_source_error(transport):
     transport["script"] = [ValueError("unknown url type")]
     with pytest.raises(http.SourceError):
         http.get_json("nonsense")
+
+
+def test_http_error_is_closed(transport):
+    closed = []
+    err = _http_error(403)
+    err.close = lambda: closed.append(1)
+    transport["script"] = [err]
+    with pytest.raises(http.SourceError):
+        http.get_json("http://x")
+    assert closed
+
+
+def test_real_network_is_blocked_by_default():
+    with pytest.raises(AssertionError, match="network in test"):
+        http._urlopen(None, 1)
