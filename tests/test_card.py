@@ -35,10 +35,18 @@ def src(monkeypatch):
         s["lookups"].append(word)
         return pick("dict")
 
-    monkeypatch.setattr(translate, "translate", lambda text, key, target="RU": pick("tr"))
-    monkeypatch.setattr(dictionary, "lookup", lookup)
-    monkeypatch.setattr(meaning, "get_meaning", lambda w, k, e: pick("mean"))
-    monkeypatch.setattr(tts, "synthesize", lambda w, lang="en-GB": pick("audio"))
+    s["calls"] = {}
+
+    def rec(name, fn):
+        def w(*args, **kw):
+            s["calls"][name] = (args, kw)
+            return fn(*args, **kw)
+        return w
+
+    monkeypatch.setattr(translate, "translate", rec("tr", lambda text, key, target="RU": pick("tr")))
+    monkeypatch.setattr(dictionary, "lookup", rec("dict", lookup))
+    monkeypatch.setattr(meaning, "get_meaning", rec("mean", lambda w, k, e: pick("mean")))
+    monkeypatch.setattr(tts, "synthesize", rec("audio", lambda w, lang="en-GB": pick("audio")))
     return s
 
 
@@ -116,5 +124,34 @@ def test_blank_results_are_not_passed_as_success(src):
     assert d.values["sound"] == "" and d.audio is None
 
 
-def test_card_module_is_importable_without_anki():
-    assert hasattr(card, "CardDraft")
+def test_unexpected_exception_is_isolated(src):
+    for key in ("tr", "dict", "mean", "audio"):
+        src[key] = RuntimeError("boom")
+    d = build_draft("smoking", occ_for("smoking"), Settings())
+    assert d.values["front"]
+    assert set(d.missing) == {"translate", "pos", "ipa", "meaning", "sound"}
+    assert d.errors and all("внутренняя ошибка" in e for e in d.errors)
+    assert not any("boom" in e for e in d.errors)
+
+
+def test_failed_lookup_gives_one_error_two_missing(src):
+    src["dict"] = SourceError("нет связи")
+    d = build_draft("smoking", occ_for("smoking"), Settings())
+    assert "pos" in d.missing and "ipa" in d.missing
+    assert len(d.errors) == 1
+
+
+def test_empty_pos_is_missing(src):
+    src["dict"] = DictEntry("", "ɡɪv", "def")
+    d = build_draft("smoking", occ_for("smoking"), Settings())
+    assert d.values["pos"] == "" and d.missing == ["pos"]
+
+
+def test_sources_receive_right_arguments(src):
+    st = Settings(deepl_key="KEY", tts_lang="en-US")
+    build_draft("give up", occ_for("give up"), st)
+    c = src["calls"]
+    assert c["tr"][0] == (SENT, "KEY")
+    assert c["mean"][0] == ("give up", "KEY", None)
+    assert c["audio"][0] == ("give up", "en-US")
+    assert "dict" not in c

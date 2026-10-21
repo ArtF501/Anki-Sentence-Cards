@@ -24,10 +24,22 @@ class CardDraft:
     errors: List[str] = field(default_factory=list)
 
 
-def _fail(draft: CardDraft, key: str, label: str, reason: str) -> None:
-    if key not in draft.missing:
-        draft.missing.append(key)
+def _fail(draft: CardDraft, keys, label: str, reason: str) -> None:
+    for key in keys:
+        if key not in draft.missing:
+            draft.missing.append(key)
     draft.errors.append("%s: %s" % (label, reason))
+
+
+def _guard(draft: CardDraft, keys, label: str, fn):
+    """Run one source. Any failure (even a non-SourceError bug) is isolated."""
+    try:
+        return fn()
+    except SourceError as e:
+        _fail(draft, keys, label, str(e))
+    except Exception:
+        _fail(draft, keys, label, "внутренняя ошибка")
+    return None
 
 
 def build_draft(word: str, occ: Occurrence, settings: Settings) -> CardDraft:
@@ -37,45 +49,44 @@ def build_draft(word: str, occ: Occurrence, settings: Settings) -> CardDraft:
     )
     d.values["front"] = mark_match(occ)
 
-    try:
+    def do_translate():
         tr = translate.translate(occ.sentence, settings.deepl_key)
         if not (tr.text or "").strip():
             raise SourceError("переводчик вернул пустой ответ")
         d.values["translate"] = tr.text.strip()
-    except SourceError as e:
-        _fail(d, "translate", "перевод предложения", str(e))
+
+    _guard(d, ["translate"], "перевод предложения", do_translate)
 
     entry = None
     if len(word.split()) > 1:
         d.values["pos"] = "phrase"
     else:
-        try:
-            entry = dictionary.lookup(word)
-            d.values["pos"] = entry.part_of_speech
-            if entry.ipa:
+        entry = _guard(d, ["pos", "ipa"], "словарь", lambda: dictionary.lookup(word))
+        if entry is not None:
+            if (entry.part_of_speech or "").strip():
+                d.values["pos"] = entry.part_of_speech
+            else:
+                _fail(d, ["pos"], "часть речи", "словарь не дал часть речи")
+            if (entry.ipa or "").strip():
                 d.values["ipa"] = entry.ipa
             else:
-                _fail(d, "ipa", "транскрипция", "словарь не дал транскрипцию")
-        except SourceError as e:
-            _fail(d, "pos", "словарь", str(e))
-            _fail(d, "ipa", "словарь", str(e))
+                _fail(d, ["ipa"], "транскрипция", "словарь не дал транскрипцию")
 
-    try:
+    def do_meaning():
         m = meaning.get_meaning(word, settings.deepl_key, entry)
         if not (m.text or "").strip():
             raise SourceError("значение пустое")
         d.values["meaning"] = m.text
-    except SourceError as e:
-        _fail(d, "meaning", "значение слова", str(e))
 
-    try:
+    _guard(d, ["meaning"], "значение слова", do_meaning)
+
+    def do_sound():
         data = tts.synthesize(word, settings.tts_lang)
         if not data:
             raise SourceError("сервис озвучки вернул пустой ответ")
-        d.audio = data
-        d.audio_name = tts.media_name(word, data)
-        d.values["sound"] = "[sound:%s]" % d.audio_name
-    except SourceError as e:
-        _fail(d, "sound", "озвучка слова", str(e))
+        name = tts.media_name(word, data)
+        d.audio, d.audio_name = data, name
+        d.values["sound"] = "[sound:%s]" % name
 
+    _guard(d, ["sound"], "озвучка слова", do_sound)
     return d
