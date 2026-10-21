@@ -43,11 +43,11 @@ def parse_entry(payload) -> DictEntry:
         raise SourceError("словарь вернул непонятный ответ")
     meaning = meanings[0]
     pos = _text(meaning.get("partOfSpeech")).lower()
-    defs = meaning.get("definitions")
-    if not isinstance(defs, list) or not defs or not isinstance(defs[0], dict):
+    defs = meaning.get("definitions", [])
+    if not isinstance(defs, list) or (defs and not isinstance(defs[0], dict)):
         raise SourceError("словарь вернул непонятный ответ")
-    definition = _text(defs[0].get("definition"))
-    if not pos or not definition:
+    definition = _text(defs[0].get("definition")) if defs else ""
+    if not pos:
         raise SourceError("словарь вернул неполный ответ")
     return DictEntry(pos, _ipa(entry), definition)
 

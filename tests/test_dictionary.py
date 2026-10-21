@@ -48,7 +48,7 @@ def test_empty_phonetics_skipped_for_next_candidate(net):
 
 
 def test_unknown_word_raises_source_error(net):
-    net["payload"] = http.SourceError("HTTP 404")
+    net["payload"] = {"title": "No Definitions Found"}
     with pytest.raises(http.SourceError):
         dictionary.lookup("qwertyzzz")
 
@@ -64,8 +64,6 @@ def test_multiword_phrase_is_not_requested(net, phrase):
     {"title": "No Definitions Found"}, [], "x", [1], [{}],
     [{"phonetics": [{"text": "/a/"}], "meanings": []}],
     [{"phonetics": [{"text": "/a/"}], "meanings": [{"partOfSpeech": "", "definitions": [{"definition": "d"}]}]}],
-    [{"phonetics": [{"text": "/a/"}], "meanings": [{"partOfSpeech": "noun", "definitions": []}]}],
-    [{"phonetics": [{"text": "/a/"}], "meanings": [{"partOfSpeech": "noun", "definitions": [{"definition": " "}]}]}],
     [{"phonetics": "oops", "meanings": [{"partOfSpeech": "noun", "definitions": [{"definition": "d"}]}]}],
 ])
 def test_parse_rejects_wrong_shapes(bad):
@@ -86,3 +84,24 @@ def test_phonetic_field_used_when_phonetics_empty():
 def test_no_transcription_keeps_part_of_speech(phonetics):
     entry = dict(phonetics, meanings=[{"partOfSpeech": "Noun", "definitions": [{"definition": "d"}]}])
     assert dictionary.parse_entry([entry]) == dictionary.DictEntry("noun", "", "d")
+
+
+@pytest.mark.parametrize("meaning_extra", [
+    {},
+    {"definitions": []},
+    {"definitions": [{}]},
+    {"definitions": [{"definition": "  "}]},
+])
+def test_empty_definition_keeps_part_of_speech_and_ipa(meaning_extra):
+    meaning = dict(meaning_extra, partOfSpeech="Noun")
+    entry = {"phonetics": [{"text": "/ab/"}], "meanings": [meaning]}
+    assert dictionary.parse_entry([entry]) == dictionary.DictEntry("noun", "ab", "")
+
+
+def test_empty_candidates_before_valid_one_are_skipped():
+    entry = {
+        "phonetic": "//",
+        "phonetics": [{"text": "  "}, {"text": "//"}, {"text": "/ɹʌn/"}],
+        "meanings": [{"partOfSpeech": "verb", "definitions": [{"definition": "d"}]}],
+    }
+    assert dictionary.parse_entry([entry]).ipa == "ɹʌn"
