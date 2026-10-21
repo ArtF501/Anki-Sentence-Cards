@@ -127,8 +127,9 @@ _NO_REVERSE = {
     "evening", "morning", "news", "during", "nothing", "something",
     "anything", "everything", "king", "thing", "wicked", "naked",
     "sacred", "hundred", "bed", "red", "this", "his", "was", "has",
-    "us", "out", "her",
 }
+# Real words that must never be produced as a bare stem of a longer word.
+_NOISE_STEMS = {"us", "out", "her"}
 _VOWELS = "aeiou"
 
 
@@ -182,7 +183,7 @@ def _single_forms(w: str) -> List[str]:
     # a bare stem that is a word of its own (using -> us, hers -> her) is noise
     return forms[:head] + [
         f for f in forms[head:]
-        if not (len(f) < len(w) and (len(f) < 3 or f in _NO_REVERSE))
+        if not (len(f) < len(w) and (len(f) < 3 or f in _NOISE_STEMS))
     ]
 
 

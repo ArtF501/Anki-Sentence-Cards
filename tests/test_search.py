@@ -148,3 +148,16 @@ def test_curly_apostrophe_in_query_finds_straight_text():
 def test_mark_match_escapes_html():
     occ, _ = find_occurrences(["AT&T made <b> a phone."], "phone", 5)
     assert mark_match(occ[0]) == "AT&amp;T made &lt;b&gt; a <b>phone</b>."
+
+
+@pytest.mark.parametrize("word,base", [
+    ("kings", "king"), ("things", "thing"), ("beds", "bed"), ("mornings", "morning"),
+    ("evenings", "evening"), ("hundreds", "hundred"),
+    ("using", "use"), ("cats", "cat"), ("loved", "love"),
+])
+def test_real_base_forms_are_generated(word, base):
+    assert base in word_forms(word)
+
+
+def test_plural_of_listed_word_finds_singular_sentence():
+    assert len(find_occurrences(["The king sat."], "kings", 5)[0]) == 1
