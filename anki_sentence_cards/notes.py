@@ -64,6 +64,21 @@ class NoteError(Exception):
     """Could not write the note; the message is user-facing (Russian)."""
 
 
+class NoteTypeMissing(NoteError):
+    """Note type does not exist: the cause is shared by the whole batch.
+
+    Means 'stop the batch', not 'mark this word as failed'.
+    """
+
+
+def check_front(draft: "CardDraft", field_map: Dict[str, str]) -> None:
+    """Refuse a note whose front side would be empty or unmapped."""
+    if not field_map.get("front"):
+        raise NoteError("Поле лицевой стороны (Front) не сопоставлено")
+    if not (draft.values.get("front") or "").strip():
+        raise NoteError("Пустая лицевая сторона карточки (Front)")
+
+
 def escape_search(text: str) -> str:
     """Escape text for use inside a quoted Anki search term."""
     out = text.replace("\\", "\\\\")
@@ -86,16 +101,20 @@ def add_note(col, draft: "CardDraft", deck: str, notetype: str, field_map: Dict[
     note (e.g. 'front' unmapped or empty). Caller contract (task 11): before
     the batch, check resolve_field_map's `unresolved` and that the note type
     exists, once; inside the per-word loop catch NoteError and, as a safety
-    net, Exception.
+    net, Exception. NoteTypeMissing (a NoteError subclass) means stop the
+    whole batch, not mark one word. An empty or unmapped front is refused
+    with NoteError before Anki is touched.
     """
+    check_front(draft, field_map)
     model = col.models.by_name(notetype)
     if model is None:
-        raise NoteError("Тип заметки не найден: %s" % notetype)
+        raise NoteTypeMissing("Тип заметки не найден: %s" % notetype)
     deck_id = col.decks.id(deck)
     if draft.audio and draft.audio_name:
         written = col.media.write_data(draft.audio_name, draft.audio)
         if isinstance(written, str):
             sync_sound_name(draft.values, draft.audio_name, written)
+            draft.audio_name = written
     note = col.new_note(model)
     for key, value in draft.values.items():
         name = field_map.get(key)
@@ -109,7 +128,7 @@ def add_note(col, draft: "CardDraft", deck: str, notetype: str, field_map: Dict[
     try:
         col.add_note(note, deck_id)
     except Exception as e:
-        raise NoteError("Anki не принял заметку (поле Front не сопоставлено или пустое?): %s" % e)
+        raise NoteError("Anki не принял заметку: %s" % e)
     return note.id
 
 
@@ -117,14 +136,16 @@ def find_duplicate(col, deck: str, word: str) -> Optional[int]:
     """Id of a note in the deck whose first field contains the word, else None.
 
     One Anki search prefilters candidates; only they are checked by regex.
-    A failing search is treated as 'no duplicate found'.
+    A failing search raises NoteError: it must not look like 'no duplicate'.
+    Task 11 should catch it, tell the user duplicate detection is off, and
+    decide whether to continue; it is not the same as returning None.
     """
     query = 'deck:"%s" "%s"' % (escape_search(deck), escape_search(word))
     pattern = re.compile(r"\b%s\b" % re.escape(word), re.IGNORECASE)
     try:
         ids = col.find_notes(query)
-    except Exception:
-        return None
+    except Exception as e:
+        raise NoteError("Не удалось проверить дубликаты: %s" % e)
     for nid in ids:
         first = col.get_note(nid).fields[0]
         if pattern.search(re.sub(r"<[^>]+>", "", first)):

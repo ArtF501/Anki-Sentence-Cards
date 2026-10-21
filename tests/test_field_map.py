@@ -1,4 +1,6 @@
-from anki_sentence_cards.notes import DEFAULT_FIELD_NAMES, resolve_field_map, note_tags, escape_search, sync_sound_name
+from anki_sentence_cards.notes import DEFAULT_FIELD_NAMES, resolve_field_map, note_tags, escape_search, sync_sound_name, check_front, NoteError, NoteTypeMissing
+from anki_sentence_cards.card import CardDraft
+import pytest
 
 ALL = ["Front", "Sound of sentence", "Translate", "Type of word",
        "Transcription of word", "Sound of word", "Meaning", "Notes"]
@@ -63,3 +65,19 @@ def test_sync_sound_name():
     assert v["sound"] == "[sound:a_1.mp3]"
     sync_sound_name(v, "a_1.mp3", "a_1.mp3")
     assert v["sound"] == "[sound:a_1.mp3]"
+
+
+def _draft(front):
+    return CardDraft(word="w", values={"front": front})
+
+
+def test_check_front():
+    check_front(_draft("a *w* b"), {"front": "Front"})
+    with pytest.raises(NoteError):
+        check_front(_draft("a"), {})
+    with pytest.raises(NoteError):
+        check_front(_draft("  "), {"front": "Front"})
+
+
+def test_note_type_missing_is_note_error():
+    assert issubclass(NoteTypeMissing, NoteError)
