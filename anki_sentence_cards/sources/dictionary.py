@@ -31,7 +31,7 @@ def _ipa(entry: dict) -> str:
         ipa = _text(c).strip("/").strip()
         if ipa:
             return ipa
-    raise SourceError("в словаре нет транскрипции")
+    return ""  # no transcription: the field stays empty, the card is still made
 
 
 def parse_entry(payload) -> DictEntry:

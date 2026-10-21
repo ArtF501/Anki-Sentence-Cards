@@ -66,7 +66,6 @@ def test_multiword_phrase_is_not_requested(net, phrase):
     [{"phonetics": [{"text": "/a/"}], "meanings": [{"partOfSpeech": "", "definitions": [{"definition": "d"}]}]}],
     [{"phonetics": [{"text": "/a/"}], "meanings": [{"partOfSpeech": "noun", "definitions": []}]}],
     [{"phonetics": [{"text": "/a/"}], "meanings": [{"partOfSpeech": "noun", "definitions": [{"definition": " "}]}]}],
-    [{"phonetics": [{"text": "//"}, {"audio": "x"}], "meanings": [{"partOfSpeech": "noun", "definitions": [{"definition": "d"}]}]}],
     [{"phonetics": "oops", "meanings": [{"partOfSpeech": "noun", "definitions": [{"definition": "d"}]}]}],
 ])
 def test_parse_rejects_wrong_shapes(bad):
@@ -77,3 +76,13 @@ def test_parse_rejects_wrong_shapes(bad):
 def test_phonetic_field_used_when_phonetics_empty():
     p = [{"phonetic": "/ab/", "phonetics": [], "meanings": [{"partOfSpeech": "Noun", "definitions": [{"definition": "d"}]}]}]
     assert dictionary.parse_entry(p) == dictionary.DictEntry("noun", "ab", "d")
+
+
+@pytest.mark.parametrize("phonetics", [
+    {},
+    {"phonetics": []},
+    {"phonetics": [{"text": "//"}, {"audio": "x"}, {"text": " "}]},
+])
+def test_no_transcription_keeps_part_of_speech(phonetics):
+    entry = dict(phonetics, meanings=[{"partOfSpeech": "Noun", "definitions": [{"definition": "d"}]}])
+    assert dictionary.parse_entry([entry]) == dictionary.DictEntry("noun", "", "d")
