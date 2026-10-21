@@ -1,0 +1,10 @@
+{
+  "books": [],
+  "active_book": "",
+  "deck": "",
+  "notetype": "",
+  "field_map": {},
+  "deepl_key": "",
+  "tts_lang": "en-GB",
+  "occurrence_limit": 50
+}
