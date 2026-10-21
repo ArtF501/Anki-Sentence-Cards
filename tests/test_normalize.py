@@ -41,3 +41,18 @@ def test_unicode_hyphen_and_soft_hyphen_are_joined():
 
 def test_kept_hyphen_gets_no_space():
     assert normalize("the Anglo-\nSaxon king") == "the Anglo-Saxon king"
+
+
+def test_normalize_query_folds_quotes_and_dashes():
+    from anki_sentence_cards.book.normalize import normalize_query
+    assert normalize_query("don’t well–known") == "don't well-known"
+
+
+def test_hyphen_join_survives_indented_continuation():
+    assert normalize("inter-\n   esting") == "interesting"
+    assert normalize("Anglo-\n   Saxon") == "Anglo-Saxon"
+    assert normalize("end-\n\nNext") == "end-\n\nNext"
+
+
+def test_u2010_hyphen_is_folded():
+    assert normalize("well‐known") == "well-known"

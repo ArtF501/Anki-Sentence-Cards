@@ -25,6 +25,7 @@ class CardDraft:
     audio_name: str = ""
     missing: List[str] = field(default_factory=list)
     errors: List[str] = field(default_factory=list)
+    warnings: List[str] = field(default_factory=list)  # batch-level notices
 
 
 def _fail(draft: CardDraft, keys, label: str, reason: str) -> None:
@@ -46,7 +47,8 @@ def _guard(draft: CardDraft, keys, label: str, fn):
     return None
 
 
-def build_draft(word: str, occ: Occurrence, settings: Settings) -> CardDraft:
+def build_draft(word: str, occ: Occurrence, settings: Settings,
+                want_sound: bool = True) -> CardDraft:
     d = CardDraft(
         word=word,
         values={k: "" for k in ("front", "translate", "pos", "ipa", "meaning", "sound")},
@@ -58,6 +60,8 @@ def build_draft(word: str, occ: Occurrence, settings: Settings) -> CardDraft:
         if not (tr.text or "").strip():
             raise SourceError("переводчик вернул пустой ответ")
         d.values["translate"] = tr.text.strip()
+        if tr.note and tr.note not in d.warnings:
+            d.warnings.append(tr.note)
 
     _guard(d, ["translate"], "перевод предложения", do_translate)
 
@@ -99,5 +103,6 @@ def build_draft(word: str, occ: Occurrence, settings: Settings) -> CardDraft:
         d.audio, d.audio_name = data, name
         d.values["sound"] = "[sound:%s]" % name
 
-    _guard(d, ["sound"], "озвучка слова", do_sound)
+    if want_sound:
+        _guard(d, ["sound"], "озвучка слова", do_sound)
     return d

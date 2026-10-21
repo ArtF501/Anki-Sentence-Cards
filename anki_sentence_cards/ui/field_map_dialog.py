@@ -45,9 +45,13 @@ class FieldMapDialog(QDialog):
 
     def _on_accept(self) -> None:
         choices = {k: c.currentData() for k, c in self._combos.items()}
-        result, ok = build_field_map(choices)
+        result, ok, collision = build_field_map(choices)
         if not ok:
             showWarning("Поле для front нужно выбрать: без него карточку не создать.")
+            return
+        if collision:
+            showWarning("Одно поле выбрано для нескольких частей карточки: "
+                        "значения затрут друг друга. Выберите разные поля.")
             return
         self.result_map = result
         self.accept()

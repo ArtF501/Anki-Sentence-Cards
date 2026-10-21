@@ -1,3 +1,5 @@
+import pytest
+
 from anki_sentence_cards.book.search import find_occurrences, mark_match, word_forms
 
 
@@ -35,8 +37,8 @@ def test_capitalized_at_sentence_start_is_found():
 
 def test_exact_flag_and_indexes():
     occ, _ = find_occurrences(["x.", "He ran home.", "I run."], "run", 50)
-    assert [o.sentence_index for o in occ] == [1, 2]
-    assert [o.exact for o in occ] == [False, True]
+    assert [o.sentence_index for o in occ] == [2, 1]
+    assert [o.exact for o in occ] == [True, False]
 
 
 def test_phrase_query_inflects_first_word():
@@ -114,3 +116,35 @@ def test_reverse_forms_find_sentences():
 def test_mark_match_without_match_has_no_empty_bold():
     from anki_sentence_cards.book.search import Occurrence, mark_match
     assert mark_match(Occurrence(0, "Nothing here.", "", 0, 0, False)) == "Nothing here."
+
+
+def test_exact_form_beats_book_order_before_limit():
+    sents = ["They use bread number %d." % i for i in range(60)] + ["I am using a pen."]
+    occ, truncated = find_occurrences(sents, "using", 50)
+    assert occ[0].exact and occ[0].sentence_index == 60
+    assert truncated is True
+
+
+def test_not_truncated_when_everything_fits():
+    occ, truncated = find_occurrences(["I run.", "He ran."], "run", 2)
+    assert len(occ) == 2 and truncated is False
+
+
+@pytest.mark.parametrize("word,bad", [("using", "us"), ("outing", "out"), ("hers", "her")])
+def test_bare_word_stems_are_not_generated(word, bad):
+    assert bad not in word_forms(word)
+
+
+def test_use_stays_a_form_of_using():
+    assert "use" in word_forms("using")
+
+
+def test_curly_apostrophe_in_query_finds_straight_text():
+    sents = ['He said "I don\'t care." It was O\'Brien.']
+    assert len(find_occurrences(sents, "don’t", 5)[0]) == 1
+    assert len(find_occurrences(sents, "O’Brien", 5)[0]) == 1
+
+
+def test_mark_match_escapes_html():
+    occ, _ = find_occurrences(["AT&T made <b> a phone."], "phone", 5)
+    assert mark_match(occ[0]) == "AT&amp;T made &lt;b&gt; a <b>phone</b>."

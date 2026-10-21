@@ -1,7 +1,10 @@
 """Word and phrase search over a list of sentences, with simple inflection."""
+import html
 import re
 from dataclasses import dataclass
 from typing import List, Tuple
+
+from .normalize import normalize_query
 
 _IRREGULAR_DATA = """
 be: am is are was were been being
@@ -124,6 +127,7 @@ _NO_REVERSE = {
     "evening", "morning", "news", "during", "nothing", "something",
     "anything", "everything", "king", "thing", "wicked", "naked",
     "sacred", "hundred", "bed", "red", "this", "his", "was", "has",
+    "us", "out", "her",
 }
 _VOWELS = "aeiou"
 
@@ -136,6 +140,7 @@ def _single_forms(w: str) -> List[str]:
         forms += _IRREGULAR[base]
     if w in _NO_REVERSE:
         return forms + [w + "s"]
+    head = len(forms)
     if w.endswith("ing") and len(w) > 4:
         stem = w[:-3]
         forms += [stem, stem + "e"]
@@ -174,7 +179,11 @@ def _single_forms(w: str) -> List[str]:
             and w[-3] not in _VOWELS
         ):
             forms += [w + w[-1] + "ed", w + w[-1] + "ing"]
-    return forms
+    # a bare stem that is a word of its own (using -> us, hers -> her) is noise
+    return forms[:head] + [
+        f for f in forms[head:]
+        if not (len(f) < len(w) and (len(f) < 3 or f in _NO_REVERSE))
+    ]
 
 
 def _dedupe(items: List[str]) -> List[str]:
@@ -192,7 +201,7 @@ def word_forms(query: str) -> List[str]:
 
     For a phrase only the first word is inflected.
     """
-    words = query.lower().split()
+    words = normalize_query(query).lower().split()
     if not words:
         return []
     rest = " ".join(words[1:])
@@ -213,6 +222,7 @@ class Occurrence:
 
 
 def _build_regex(query: str):
+    query = normalize_query(query)
     forms = sorted(word_forms(query), key=len, reverse=True)
     alts = [r"\s+".join(re.escape(p) for p in f.split()) for f in forms]
     return re.compile(
@@ -225,7 +235,8 @@ def _build_regex(query: str):
 def find_occurrences(
     sentences: List[str], query: str, limit: int
 ) -> Tuple[List[Occurrence], bool]:
-    """First match per sentence; returns (occurrences, truncated)."""
+    """First match per sentence; exact forms first; returns (occurrences, truncated)."""
+    query = normalize_query(query)
     if not query.split():
         return [], False
     rx = _build_regex(query)
@@ -241,18 +252,21 @@ def find_occurrences(
                 break
         if m is None:
             continue
-        if len(result) >= limit:
-            return result, True
         found = m.group(0)
         result.append(
             Occurrence(i, s, found, m.start(), m.end(),
                        " ".join(found.lower().split()) == exact_norm)
         )
+    result.sort(key=lambda o: not o.exact)  # stable: book order within groups
+    if len(result) > limit:
+        return result[:limit], True
     return result, False
 
 
 def mark_match(occ: Occurrence) -> str:
     s = occ.sentence
+    esc = lambda t: html.escape(t, quote=False)
     if occ.start == occ.end:  # hand-typed sentence without the word: no empty <b>
-        return s
-    return s[: occ.start] + "<b>" + s[occ.start : occ.end] + "</b>" + s[occ.end :]
+        return esc(s)
+    return (esc(s[: occ.start]) + "<b>" + esc(s[occ.start : occ.end])
+            + "</b>" + esc(s[occ.end :]))

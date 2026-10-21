@@ -162,7 +162,7 @@ def add_note(col, draft: "CardDraft", deck: str, notetype: str, field_map: Dict[
     if model is None:
         raise NoteTypeMissing("Тип заметки не найден: %s" % notetype)
     deck_id = col.decks.id(deck)
-    if draft.audio and draft.audio_name:
+    if draft.audio and draft.audio_name and field_map.get("sound"):
         written = col.media.write_data(draft.audio_name, draft.audio)
         if isinstance(written, str):
             sync_sound_name(draft.values, draft.audio_name, written)

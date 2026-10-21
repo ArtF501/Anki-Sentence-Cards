@@ -14,6 +14,7 @@ GOOGLE_URL = "https://translate.googleapis.com/translate_a/single"
 class Translation:
     text: str
     engine: str
+    note: str = ""  # why the preferred engine was skipped, if it was tried
 
 
 def parse_deepl(payload) -> str:
@@ -31,9 +32,10 @@ def parse_google(payload) -> str:
     if not isinstance(payload, list) or not payload or not isinstance(payload[0], list):
         raise bad
     parts = payload[0]
-    if not all(isinstance(p, list) and p and isinstance(p[0], str) for p in parts):
+    if not isinstance(parts, list):
         raise bad
-    text = "".join(p[0] for p in parts)
+    # extra chunks (transliteration etc.) have no string first item: skip them
+    text = "".join(p[0] for p in parts if isinstance(p, list) and p and isinstance(p[0], str))
     if not text.strip():
         raise SourceError("Google Translate вернул пустой перевод")
     return text
@@ -57,12 +59,13 @@ def _google(text: str, target: str) -> str:
 
 
 def translate(text: str, deepl_key: str, target: str = "RU") -> Translation:
+    note = ""
     if deepl_key and deepl_key.strip():
         try:
             return Translation(_deepl(text, deepl_key.strip(), target), "deepl")
-        except SourceError:
-            pass  # fall through to Google
+        except SourceError as e:
+            note = "DeepL отказал (%s), перевод через Google" % e
     try:
-        return Translation(_google(text, target), "google")
+        return Translation(_google(text, target), "google", note)
     except SourceError as e:
         raise SourceError("перевод недоступен: %s" % e)

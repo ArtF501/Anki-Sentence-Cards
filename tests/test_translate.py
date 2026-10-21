@@ -83,3 +83,23 @@ def test_parse_google_rejects_wrong_shapes(bad):
 def test_whitespace_only_key_goes_to_google(net):
     assert translate.translate("Hello", deepl_key="  ").engine == "google"
     assert net["posts"] == []
+
+
+def test_google_extra_non_string_chunk_is_skipped():
+    payload = [[["Привет", "Hello"], [None, None, "Privet"]], None, "en"]
+    assert translate.parse_google(payload) == "Привет"
+
+
+def test_google_only_garbage_chunks_still_rejected():
+    with pytest.raises(http.SourceError):
+        translate.parse_google([[[None, "x"]], None, "en"])
+
+
+def test_deepl_refusal_is_noted(net):
+    net["deepl"] = http.SourceError("403")
+    tr = translate.translate("Hi", "key")
+    assert tr.engine == "google" and "DeepL" in tr.note and "403" in tr.note
+
+
+def test_no_note_without_key(net):
+    assert translate.translate("Hi", "").note == ""

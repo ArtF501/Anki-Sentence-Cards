@@ -3,6 +3,7 @@
 All decisions live in ..batch (tested). This file is only Qt glue and is
 verified by hand (see the task 11 report).
 """
+import logging
 import os
 
 from aqt.operations import QueryOp
@@ -19,6 +20,10 @@ from ..book.search import find_occurrences
 from ..card import build_draft
 from ..notes import add_note, find_duplicate
 from ..settings import load_settings
+
+log = logging.getLogger(__name__)
+
+PROFILE_CLOSED = "Профиль закрыт, партия не записана."
 
 PAGE_INPUT, PAGE_PICK, PAGE_REPORT = 0, 1, 2
 
@@ -66,6 +71,9 @@ class MainDialog(QDialog):
 
     def _start(self):
         if self._busy:
+            return
+        if self.mw.col is None:
+            showWarning("Профиль закрыт: откройте профиль и окно аддона заново.")
             return
         words = batch.parse_words(self.words_edit.toPlainText())
         if not words:
@@ -205,6 +213,9 @@ class MainDialog(QDialog):
 
     # ---- build
     def _finish_picking(self):
+        if self.mw.col is None:
+            showWarning(PROFILE_CLOSED)
+            return
         picks = self.state.picks
         self.skipped_all += self.state.skipped
         result = batch.BatchResult()
@@ -223,11 +234,24 @@ class MainDialog(QDialog):
 
             def guarded(fn):
                 def inner(arg):
+                    profile_closed = self.mw.col is None
                     self._busy = False
-                    self.start_btn.setEnabled(True)
-                    if self.mw.col is None:
-                        return  # profile closed meanwhile: nothing to write to
-                    fn(arg)
+                    try:
+                        self.start_btn.setEnabled(True)
+                    except RuntimeError:  # the dialog was destroyed meanwhile
+                        pass
+                    if profile_closed:
+                        log.warning("profile closed during the batch: results dropped")
+                        try:
+                            showWarning(PROFILE_CLOSED)
+                        except RuntimeError:
+                            pass
+                        return
+                    try:
+                        fn(arg)
+                    except RuntimeError:  # widgets gone while showing the report
+                        log.exception("dialog destroyed before the report was shown")
+                    
                 return inner
 
             QueryOp(parent=self, op=lambda _c: work(), success=guarded(ok)).failure(
@@ -240,7 +264,7 @@ class MainDialog(QDialog):
 
         batch.run_batch(
             picks, lambda w: find_duplicate(col, deck, w),
-            lambda w, o: build_draft(w, o, settings),
+            lambda w, o: build_draft(w, o, settings, bool(fmap.get("sound"))),
             lambda d: add_note(self.mw.col, d, deck, notetype, fmap),
             result, run_bg, done, progress)
 

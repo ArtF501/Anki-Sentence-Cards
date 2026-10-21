@@ -30,6 +30,11 @@ def load_text(path: Path) -> str:
 
 def _load_txt(path: Path) -> str:
     data = path.read_bytes()
+    if data[:2] in (b"\xff\xfe", b"\xfe\xff"):
+        try:
+            return data.decode("utf-16")
+        except UnicodeDecodeError:
+            pass
     for enc in ("utf-8-sig", "cp1252"):
         try:
             return data.decode(enc)
@@ -96,8 +101,11 @@ def _ensure_typing_extensions() -> None:
     """pypdf does an absolute `from typing_extensions import ...` on Python < 3.11.
     Expose the vendored copy under that name when the environment has none."""
     try:
-        import typing_extensions  # noqa: F401
+        import typing_extensions as te
+        usable = hasattr(te, "Self") and hasattr(te, "TypeAlias")
     except ImportError:
+        usable = False
+    if not usable:  # missing, or too old for pypdf (no Self before 4.0)
         from ..vendor import typing_extensions as vendored
 
         sys.modules["typing_extensions"] = vendored

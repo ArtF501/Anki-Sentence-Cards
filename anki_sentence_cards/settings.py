@@ -95,10 +95,12 @@ def remove_book(books: List[str], active: str, path: str) -> Tuple[List[str], st
     return rest, active
 
 
-def build_field_map(choices: Dict[str, str]) -> Tuple[Dict[str, str], bool]:
+def build_field_map(choices: Dict[str, str]) -> Tuple[Dict[str, str], bool, bool]:
     """Keep 'not filled' as an explicit "" entry so it survives a reload.
 
     Second value is False when front is missing. Only front is mandatory
-    (ruling N7); other keys may be disabled.
+    (ruling N7); other keys may be disabled. Third value is True when two
+    keys point at the same note field (one value would overwrite the other).
     """
-    return dict(choices), bool(choices.get("front"))
+    chosen = [v for v in choices.values() if v]
+    return dict(choices), bool(choices.get("front")), len(chosen) != len(set(chosen))

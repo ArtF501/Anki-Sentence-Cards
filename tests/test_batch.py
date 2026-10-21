@@ -229,3 +229,12 @@ def test_retry_goes_back_to_picking_only_with_problem_words():
     outs = [b.Outcome("a", b.CREATED), b.Outcome("d", b.FAILED, ["x"])]
     st = b.PickState(b.retry_words(outs))
     assert st.words == ["d"]
+
+
+def test_parse_words_strips_numbering_and_edge_punctuation():
+    assert b.parse_words("1. reluctant\nreluctant,\n2) give up;\n- “odd”\n") == ["reluctant", "give up", "odd"]
+
+
+def test_manual_occurrence_normalizes_curly_apostrophe():
+    occ = b.manual_occurrence("don't", "I don’t know.")
+    assert b.highlight_html(occ) == "I <b>don&#x27;t</b> know."

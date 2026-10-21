@@ -54,7 +54,7 @@ def test_mappable_fields_drops_excluded():
 
 
 def test_build_field_map_keeps_not_filled_explicit():
-    m, ok = build_field_map({"front": "Front", "ipa": NOT_FILLED, "pos": "Type"})
+    m, ok, _c = build_field_map({"front": "Front", "ipa": NOT_FILLED, "pos": "Type"})
     assert m == {"front": "Front", "ipa": "", "pos": "Type"}
     assert ok is True
 
@@ -68,7 +68,7 @@ FIELDS = ["Front", "Translate", "Type of word", "Transcription of word", "Meanin
 
 
 def test_not_filled_survives_save_and_reload():
-    m, _ = build_field_map({"front": "Front", "translate": NOT_FILLED})
+    m, _, _c = build_field_map({"front": "Front", "translate": NOT_FILLED})
     s = load_settings(merge_for_save({}, Settings(field_map=m)))
     resolved, unresolved = resolve_field_map(FIELDS, s.field_map)
     assert "translate" not in resolved      # default name exists, still disabled
@@ -135,3 +135,12 @@ def test_normalize_active():
     assert normalize_active(["a", "b"], "b") == "b"
     assert normalize_active(["a", "b"], "zz") == "a"
     assert normalize_active([], "zz") == ""
+
+
+def test_build_field_map_detects_collision():
+    _, ok, collision = build_field_map({"front": "Front", "meaning": "Meaning", "pos": "Meaning"})
+    assert ok and collision
+
+
+def test_build_field_map_empty_choices_are_not_a_collision():
+    assert build_field_map({"front": "Front", "ipa": NOT_FILLED, "pos": NOT_FILLED})[2] is False

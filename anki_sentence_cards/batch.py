@@ -6,9 +6,11 @@ call them too. Error handling follows the contract of notes.py.
 from __future__ import annotations
 
 import html
+import re
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Tuple
 
+from .book.normalize import normalize_query
 from .book.search import Occurrence, find_occurrences
 from .notes import DuplicateCheckFailed, NoteError, NoteTypeMissing, resolve_field_map
 
@@ -19,12 +21,18 @@ FAILED = "failed"
 NOT_PROCESSED = "not_processed"
 
 
+_LEAD = re.compile(r"^\(?\d+[.)]\s+|^[-*\u2022]\s+")
+_EDGE_PUNCT = ",.;:!?\"“”«»()[]"
+
+
 def parse_words(text: str) -> List[str]:
     """One word or phrase per line; empty lines and repeats (any case) dropped."""
     seen = set()
     out: List[str] = []
     for line in text.splitlines():
         w = " ".join(line.split())
+        w = _LEAD.sub("", w)
+        w = w.strip(_EDGE_PUNCT).strip()
         if w and w.lower() not in seen:
             seen.add(w.lower())
             out.append(w)
@@ -33,7 +41,7 @@ def parse_words(text: str) -> List[str]:
 
 def manual_occurrence(word: str, sentence: str) -> Occurrence:
     """Occurrence for a hand-typed sentence; the word is bolded if it occurs."""
-    sentence = " ".join(sentence.split())
+    sentence = normalize_query(" ".join(sentence.split()))
     found, _ = find_occurrences([sentence], word, 1)
     if found:
         return found[0]
@@ -183,6 +191,10 @@ def build_drafts(picks: List[Pick], build: Callable, progress: Callable[[int, in
 def add_all(built, add: Callable, result: BatchResult) -> None:
     """Main thread: write notes. NoteTypeMissing stops the batch."""
     for n, (p, draft, err) in enumerate(built):
+        if draft is not None:
+            for w in draft.warnings:
+                if w not in result.warnings:
+                    result.warnings.append(w)
         if draft is None:
             result.outcomes.append(Outcome(p.word, FAILED, [err]))
             continue

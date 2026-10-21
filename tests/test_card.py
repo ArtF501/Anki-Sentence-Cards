@@ -174,3 +174,14 @@ def test_unexpected_exception_is_logged(src, caplog):
     src["tr"] = RuntimeError("boom")
     build_draft("smoking", occ_for("smoking"), Settings())
     assert any(r.exc_info and "boom" in str(r.exc_info[1]) for r in caplog.records)
+
+
+def test_sound_not_requested_when_unmapped(src):
+    d = build_draft("smoking", occ_for("smoking"), Settings(), want_sound=False)
+    assert "audio" not in src["calls"] and d.audio is None and "sound" not in d.missing
+
+
+def test_deepl_fallback_note_reaches_draft_warnings(src):
+    src["tr"] = translate.Translation("Привет", "google", "DeepL отказал (403)")
+    d = build_draft("smoking", occ_for("smoking"), Settings())
+    assert d.warnings == ["DeepL отказал (403)"]

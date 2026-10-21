@@ -80,3 +80,15 @@ def test_media_name_fallback_word():
     assert tts.media_name("...", b"a") == tts.media_name("!!!", b"a")
     assert tts.media_name("...", b"a").startswith("word_")
     assert tts.media_name("[sound:x]", b"a").startswith("sound_x_")
+
+
+@pytest.mark.parametrize("body", [b"<html>captcha</html>", b'  {"error": 1}', b"plain text", b"\n<!doctype html>"])
+def test_non_audio_response_rejected(net, body):
+    net["resp"] = body
+    with pytest.raises(http.SourceError):
+        tts.synthesize("word")
+
+
+def test_raw_mpeg_frame_accepted(net):
+    net["resp"] = b"\xff\xfb\x90\x00data"
+    assert tts.synthesize("word").startswith(b"\xff\xfb")
