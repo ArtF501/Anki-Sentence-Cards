@@ -31,6 +31,12 @@ def _norm(name: str) -> str:
     return re.sub(r"\s+", "", name).lower()
 
 
+def mappable_fields(notetype_fields: List[str]) -> List[str]:
+    """Note type fields the addon may fill (without the excluded ones)."""
+    excluded = {_norm(n) for n in _EXCLUDED}
+    return [f for f in notetype_fields if _norm(f) not in excluded]
+
+
 def resolve_field_map(notetype_fields: List[str], saved: Dict[str, str]) -> Tuple[Dict[str, str], List[str]]:
     """Map logical keys to note field names; return (map, unresolved keys).
 
@@ -39,8 +45,7 @@ def resolve_field_map(notetype_fields: List[str], saved: Dict[str, str]) -> Tupl
     other key). Any other unresolved key means: warn the user once, leave
     that field empty, still create the card.
     """
-    excluded = {_norm(n) for n in _EXCLUDED}
-    fields = [f for f in notetype_fields if _norm(f) not in excluded]
+    fields = mappable_fields(notetype_fields)
     result: Dict[str, str] = {}
     unresolved: List[str] = []
     for key, default in DEFAULT_FIELD_NAMES.items():
