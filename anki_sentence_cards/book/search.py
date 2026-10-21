@@ -3,65 +3,166 @@ import re
 from dataclasses import dataclass
 from typing import List, Tuple
 
-_IRREGULAR = {
-    "be": ["is", "are", "was", "were", "been", "being"],
-    "begin": ["began", "begun"],
-    "bring": ["brought"],
-    "buy": ["bought"],
-    "come": ["came"],
-    "do": ["did", "done"],
-    "drink": ["drank", "drunk"],
-    "eat": ["ate", "eaten"],
-    "fall": ["fell", "fallen"],
-    "find": ["found"],
-    "get": ["got", "gotten"],
-    "give": ["gave", "given"],
-    "go": ["went", "gone"],
-    "have": ["has", "had"],
-    "know": ["knew", "known"],
-    "leave": ["left"],
-    "make": ["made"],
-    "run": ["ran"],
-    "say": ["said"],
-    "see": ["saw", "seen"],
-    "take": ["took", "taken"],
-    "think": ["thought"],
-    "write": ["wrote", "written"],
+_IRREGULAR_DATA = """
+be: am is are was were been being
+arise: arose arisen
+bear: bore born borne
+beat: beaten
+become: became
+begin: began begun
+bend: bent
+bite: bit bitten
+blow: blew blown
+break: broke broken
+bring: brought
+build: built
+burn: burnt
+buy: bought
+catch: caught
+choose: chose chosen
+come: came
+cost:
+cut:
+deal: dealt
+dig: dug
+do: did done does
+draw: drew drawn
+dream: dreamt
+drink: drank drunk
+drive: drove driven
+eat: ate eaten
+fall: fell fallen
+feed: fed
+feel: felt
+fight: fought
+find: found
+flee: fled
+fly: flew flown
+forget: forgot forgotten
+forgive: forgave forgiven
+freeze: froze frozen
+get: got gotten
+give: gave given
+go: went gone goes
+grow: grew grown
+hang: hung
+have: has had
+hear: heard
+hide: hid hidden
+hit:
+hold: held
+hurt:
+keep: kept
+know: knew known
+lay: laid
+lead: led
+leave: left
+lend: lent
+let:
+lie: lay lain
+light: lit
+lose: lost
+make: made
+mean: meant
+meet: met
+pay: paid
+put:
+read:
+ride: rode ridden
+ring: rang rung
+rise: rose risen
+run: ran
+say: said
+see: saw seen
+seek: sought
+sell: sold
+send: sent
+set:
+shake: shook shaken
+shine: shone
+shoot: shot
+show: shown
+shut:
+sing: sang sung
+sink: sank sunk
+sit: sat
+sleep: slept
+slide: slid
+speak: spoke spoken
+spend: spent
+spread:
+stand: stood
+steal: stole stolen
+stick: stuck
+strike: struck
+swear: swore sworn
+sweep: swept
+swim: swam swum
+swing: swung
+take: took taken
+teach: taught
+tear: tore torn
+tell: told
+think: thought
+throw: threw thrown
+understand: understood
+wake: woke woken
+wear: wore worn
+win: won
+write: wrote written
+"""
+_IRREGULAR = {}
+for _line in _IRREGULAR_DATA.strip().splitlines():
+    _b, _f = _line.split(":")
+    _IRREGULAR[_b.strip()] = _f.split()
+_IRREGULAR_BACK = {}
+for _b, _fs in _IRREGULAR.items():
+    for _f in _fs:
+        _IRREGULAR_BACK.setdefault(_f, []).append(_b)
+# Words that look inflected but are words of their own: never cut back.
+_NO_REVERSE = {
+    "evening", "morning", "news", "during", "nothing", "something",
+    "anything", "everything", "king", "thing", "wicked", "naked",
+    "sacred", "hundred", "bed", "red", "this", "his", "was", "has",
 }
-_IRREGULAR_BACK = {f: b for b, fs in _IRREGULAR.items() for f in fs}
 _VOWELS = "aeiou"
 
 
 def _single_forms(w: str) -> List[str]:
     forms = [w]
     forms += _IRREGULAR.get(w, [])
-    if w in _IRREGULAR_BACK:
-        base = _IRREGULAR_BACK[w]
+    for base in _IRREGULAR_BACK.get(w, []):
         forms.append(base)
         forms += _IRREGULAR[base]
+    if w in _NO_REVERSE:
+        return forms + [w + "s"]
     if w.endswith("ing") and len(w) > 5:
         stem = w[:-3]
-        forms += [stem, stem + "e"]
+        if len(stem) >= 4:
+            forms += [stem, stem + "e"]
         if stem[-1] == stem[-2]:
             forms.append(stem[:-1])
-    if w.endswith("ied") and len(w) > 4:
+    if w.endswith("ied") and len(w) > 5:
         forms.append(w[:-3] + "y")
     elif w.endswith("ed") and len(w) > 4:
         stem = w[:-2]
-        forms += [stem, stem + "e"]
+        if len(stem) >= 4:
+            forms += [stem, stem + "e"]
         if stem[-1] == stem[-2]:
             forms.append(stem[:-1])
-    if w.endswith("ies") and len(w) > 4:
+    if w.endswith("ies") and len(w) > 5:
         forms.append(w[:-3] + "y")
-    elif w.endswith("es") and len(w) > 4:
+    elif w.endswith("es") and len(w) > 5:
         forms.append(w[:-2])
-    if w.endswith("s") and len(w) > 3 and not w.endswith("ss"):
+    if w.endswith("s") and len(w) > 4 and not w.endswith("ss"):
         forms.append(w[:-1])
 
     if len(w) > 1 and w[-1] == "y" and w[-2] not in _VOWELS:
         forms += [w[:-1] + "ies", w[:-1] + "ied", w + "ing"]
     elif w.endswith("e") and len(w) > 2:
-        forms += [w + "s", w + "d", w[:-1] + "ing"]
+        forms += [w + "s", w[:-1] + "ing"]
+        if not (len(w) <= 3 and w.endswith("ee")):  # see -> seed is not a form
+            forms.append(w + "d")
     else:
         forms += [w + "s", w + "ed", w + "ing"]
         if w.endswith(("s", "x", "z", "ch", "sh")):
@@ -117,7 +218,8 @@ def _build_regex(query: str):
     forms = sorted(word_forms(query), key=len, reverse=True)
     alts = [r"\s+".join(re.escape(p) for p in f.split()) for f in forms]
     return re.compile(
-        r"(?<![\w'’])(?:" + "|".join(alts) + r")(?![\w'’])",
+        r"(?<!\w)(?<!\w['’])(?:" + "|".join(alts)
+        + r")(?!\w)(?!['’](?!s\b)\w)",
         re.IGNORECASE,
     )
 
@@ -132,8 +234,14 @@ def find_occurrences(
     exact_norm = " ".join(query.lower().split())
     result: List[Occurrence] = []
     for i, s in enumerate(sentences):
-        m = rx.search(s)
-        if not m:
+        m = None
+        for cand in rx.finditer(s):
+            if m is None:
+                m = cand
+            if " ".join(cand.group(0).lower().split()) == exact_norm:
+                m = cand
+                break
+        if m is None:
             continue
         if len(result) >= limit:
             return result, True

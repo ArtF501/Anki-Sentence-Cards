@@ -10,6 +10,9 @@ from .normalize import normalize
 from .sentences import split_sentences
 
 
+_CACHE_VERSION = 1  # bump when normalize/split rules change
+
+
 @dataclass
 class Book:
     path: str
@@ -28,15 +31,21 @@ def load_book(path: Path, cache_dir: Path) -> Book:
     cache = _cache_file(path, cache_dir)
     try:
         data = json.loads(cache.read_text(encoding="utf-8"))
-        if data["mtime"] == mtime and isinstance(data["sentences"], list):
-            return Book(str(path), data["sentences"])
+        sents = data["sentences"]
+        if (
+            data["v"] == _CACHE_VERSION
+            and data["mtime"] == mtime
+            and isinstance(sents, list)
+            and all(isinstance(x, str) for x in sents)
+        ):
+            return Book(str(path), sents)
     except (OSError, ValueError, KeyError, TypeError):
         pass
     sentences = split_sentences(normalize(load_text(path)))
     try:
         cache_dir.mkdir(parents=True, exist_ok=True)
         cache.write_text(
-            json.dumps({"mtime": mtime, "sentences": sentences}, ensure_ascii=False),
+            json.dumps({"v": _CACHE_VERSION, "mtime": mtime, "sentences": sentences}, ensure_ascii=False),
             encoding="utf-8",
         )
     except OSError:

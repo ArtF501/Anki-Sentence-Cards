@@ -62,3 +62,34 @@ def test_not_truncated_when_within_limit():
 def test_mark_match_wraps_found_form():
     occ, _ = find_occurrences(["He gave up."], "give up", 50)
     assert mark_match(occ[0]) == "He <b>gave up</b>."
+
+
+def _n(sents, q):
+    return len(find_occurrences(sents, q, 50)[0])
+
+
+def test_quoted_words_and_possessives_found():
+    assert _n(["He said 'can you swim' loudly."], "can") == 1
+    assert _n(["'I will run'"], "run") == 1
+    assert _n(["the cat's tail"], "cat") == 1
+    assert _n(["It is six o'clock."], "clock") == 0
+    assert _n(["I can't swim."], "can") == 0
+
+
+def test_no_foreign_words_from_bad_candidates():
+    assert _n(["The seed grew."], "see") == 0
+    assert _n(["Something new."], "news") == 0
+    assert _n(["Even so."], "evening") == 0
+    assert _n(["A wick burned."], "wicked") == 0
+
+
+def test_irregular_verbs():
+    assert _n(["He told me."], "tell") == 1
+    assert _n(["She felt cold."], "feel") == 1
+    assert _n(["I am here."], "be") == 1
+    assert _n(["He sat down."], "sit") == 1
+
+
+def test_exact_form_preferred_within_sentence():
+    occ, _ = find_occurrences(["He ran and I run."], "run", 50)
+    assert occ[0].matched_form == "run" and occ[0].exact is True
