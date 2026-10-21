@@ -37,3 +37,23 @@ def test_paragraph_boundary_splits_without_terminator():
 
 def test_empty():
     assert split_sentences("") == []
+
+
+def test_dialogue_ending_in_no_splits():
+    assert split_sentences('"I said no." He left.') == ['"I said no."', "He left."]
+
+
+def test_no_before_capital_splits():
+    assert split_sentences("Oh, no. He left.") == ["Oh, no.", "He left."]
+
+
+def test_etc_before_capital_splits():
+    assert split_sentences("He left, etc. Then he returned.") == ["He left, etc.", "Then he returned."]
+
+
+def test_ordinal_1st_is_not_st_abbreviation():
+    assert split_sentences("on the 1st. Then he left.") == ["on the 1st.", "Then he left."]
+
+
+def test_titles_are_case_sensitive():
+    assert split_sentences("He met dr. Then he left.") == ["He met dr.", "Then he left."]

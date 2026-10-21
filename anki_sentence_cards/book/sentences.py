@@ -1,12 +1,12 @@
 """Split normalized text into sentences."""
 import re
 
-_ABBREVIATIONS = {"mr", "mrs", "ms", "dr", "st", "etc", "prof", "sr", "jr",
-                  "vs", "mt", "gen", "col", "capt", "lt", "sgt", "no"}
+_ABBREVIATIONS = {"Mr", "Mrs", "Ms", "Dr", "St", "Prof", "Sr", "Jr", "Mt",
+                  "Gen", "Col", "Capt", "Lt", "Sgt", "vs"}
 # terminator run, optional closing quotes/brackets, then whitespace
 _BOUNDARY = re.compile(r"""([.?!]+['")\]]*)\s+""")
 _NEXT_OK = re.compile(r"""['"(\[]*[A-Z0-9]""")
-_LAST_WORD = re.compile(r"([A-Za-z]+)\.$")
+_LAST_WORD = re.compile(r"(?<![A-Za-z0-9])([A-Za-z]+)\.$")
 
 
 def _is_abbreviation(chunk: str) -> bool:
@@ -14,8 +14,9 @@ def _is_abbreviation(chunk: str) -> bool:
     if not m:
         return False
     word = m.group(1)
-    # single capital letter is an initial; "etc." etc. are listed
-    return (len(word) == 1 and word.isupper()) or word.lower() in _ABBREVIATIONS
+    # single capital letter is an initial; titles are case-sensitive.
+    # "etc." needs no entry: it only splits before a capital (already required).
+    return (len(word) == 1 and word.isupper()) or word in _ABBREVIATIONS
 
 
 def _split_paragraph(par: str) -> list:

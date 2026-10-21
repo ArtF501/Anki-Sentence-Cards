@@ -1,5 +1,6 @@
 """Load a book file (.txt, .epub, .pdf) into raw text."""
 import posixpath
+import sys
 import zipfile
 from html.parser import HTMLParser
 from pathlib import Path
@@ -11,16 +12,20 @@ class UnsupportedFormat(Exception):
     pass
 
 
+class BookLoadError(Exception):
+    """The book file is unreadable or corrupt."""
+
+
 def load_text(path: Path) -> str:
     path = Path(path)
     ext = path.suffix.lower()
-    if ext == ".txt":
-        return _load_txt(path)
-    if ext == ".epub":
-        return _load_epub(path)
-    if ext == ".pdf":
-        return _load_pdf(path)
-    raise UnsupportedFormat("Unsupported book format: %r" % ext)
+    loader = {".txt": _load_txt, ".epub": _load_epub, ".pdf": _load_pdf}.get(ext)
+    if loader is None:
+        raise UnsupportedFormat("Unsupported book format: %r" % ext)
+    try:
+        return loader(path)
+    except Exception as exc:
+        raise BookLoadError("Cannot read %s: %s" % (path.name, exc)) from exc
 
 
 def _load_txt(path: Path) -> str:
@@ -87,7 +92,19 @@ def _load_epub(path: Path) -> str:
     return "\n\n".join(chapters)
 
 
+def _ensure_typing_extensions() -> None:
+    """pypdf does an absolute `from typing_extensions import ...` on Python < 3.11.
+    Expose the vendored copy under that name when the environment has none."""
+    try:
+        import typing_extensions  # noqa: F401
+    except ImportError:
+        from ..vendor import typing_extensions as vendored
+
+        sys.modules["typing_extensions"] = vendored
+
+
 def _load_pdf(path: Path) -> str:
+    _ensure_typing_extensions()
     from ..vendor import pypdf
 
     reader = pypdf.PdfReader(str(path))

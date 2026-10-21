@@ -32,3 +32,12 @@ def test_broken_lines_fixture():
     assert "contemporary" in out
     assert "Page" not in out and "[3]" not in out
     assert "\"I can't wait,\" he said, \"for the next train.\"" in out
+
+
+def test_unicode_hyphen_and_soft_hyphen_are_joined():
+    assert "contemporary" in normalize("contem‐\nporary man")
+    assert "contemporary" in normalize("contem­\nporary man")
+
+
+def test_kept_hyphen_gets_no_space():
+    assert normalize("the Anglo-\nSaxon king") == "the Anglo-Saxon king"

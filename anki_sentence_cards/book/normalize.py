@@ -12,7 +12,10 @@ _HEADER_LINE = re.compile(r"^\s*(?:page\s+)?\d+\s*$", re.IGNORECASE)
 def normalize(raw: str) -> str:
     text = raw.replace("\r\n", "\n").replace("\r", "\n")
     # 1. join words broken by a hyphen at end of line
-    text = re.sub(r"(?<=[a-z])-\n(?=[a-z])", "", text)
+    text = re.sub(r"(?<=[a-z])[-\u2010\u00ad]\n(?=[a-z])", "", text)
+    text = text.replace("\u00ad", "")
+    # a hyphen kept at line end must not gain a space after it
+    text = re.sub(r"(?<=[A-Za-z][-\u2010])\n(?=\S)", "", text)
     # 2. drop running headers / page numbers and footnote markers
     text = "\n".join(ln for ln in text.split("\n") if not _HEADER_LINE.match(ln))
     text = re.sub(r"\[\d+\]", "", text)
