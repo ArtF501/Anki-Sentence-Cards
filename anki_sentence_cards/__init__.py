@@ -15,6 +15,9 @@ if mw is not None:
     _action.triggered.connect(lambda: open_settings(mw))
     _menu.addAction(_action)
 
+    from .ui.main_dialog import register
+    register(mw)
+
 
 def get_menu():
     """The add-on's Tools submenu, or None outside Anki.

@@ -9,7 +9,7 @@ def _core_files():
     files = []
     for sub in ("book", "sources"):
         files += sorted((PKG / sub).glob("*.py"))
-    files += [PKG / "card.py", PKG / "settings.py"]
+    files += [PKG / "card.py", PKG / "settings.py", PKG / "batch.py"]
     return [f for f in files if f.exists()]
 
 

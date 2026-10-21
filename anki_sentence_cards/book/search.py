@@ -253,4 +253,6 @@ def find_occurrences(
 
 def mark_match(occ: Occurrence) -> str:
     s = occ.sentence
+    if occ.start == occ.end:  # hand-typed sentence without the word: no empty <b>
+        return s
     return s[: occ.start] + "<b>" + s[occ.start : occ.end] + "</b>" + s[occ.end :]
