@@ -39,6 +39,9 @@ class MainDialog(QDialog):
         self.pf = None
         self.occs = []
         self._busy = False
+        self.total = batch.BatchResult()
+        self.skipped_all = []
+        self._retrying = []
 
         root = QVBoxLayout(self)
         self.stack = QStackedWidget()
@@ -71,7 +74,7 @@ class MainDialog(QDialog):
         s = self.settings
         fields = None
         model = self.mw.col.models.by_name(s.notetype) if s.notetype else None
-        if model:
+        if model is not None:
             fields = [f["name"] for f in model["flds"]]
         self.pf = batch.preflight(s, fields, bool(s.active_book) and os.path.isfile(s.active_book))
         if self.pf.fatal:
@@ -108,8 +111,8 @@ class MainDialog(QDialog):
 
     def _open_state(self, words):
         self.state = batch.PickState(words)
-        self._show_word()
         self.stack.setCurrentIndex(PAGE_PICK)
+        self._show_word()
 
     # ---- page 2: pick
     def _make_pick(self):
@@ -203,37 +206,54 @@ class MainDialog(QDialog):
     # ---- build
     def _finish_picking(self):
         picks = self.state.picks
-        self.result = batch.BatchResult()
-        if not picks:
-            self._show_report()
-            return
+        self.skipped_all += self.state.skipped
+        result = batch.BatchResult()
         col = self.mw.col
-        deck, notetype = self.settings.deck, self.settings.notetype
-        rest = batch.split_duplicates(picks, lambda w: find_duplicate(col, deck, w), self.result)
-        if not rest:
-            self._show_report()
-            return
-        settings = self.settings
-        mw = self.mw
+        settings, mw = self.settings, self.mw
+        deck, notetype, fmap = settings.deck, settings.notetype, self.pf.field_map
 
         def progress(i, n, word):
             mw.taskman.run_on_main(
                 lambda: mw.progress.update(label="%s (%d из %d)" % (word, i + 1, n), value=i, max=n))
 
-        def op(_col):
-            return batch.build_drafts(rest, lambda w, o: build_draft(w, o, settings), progress)
+        def run_bg(work, ok, fail):
+            self._busy = True
+            self.start_btn.setEnabled(False)
+            self.stack.setCurrentIndex(PAGE_INPUT)
 
-        def ok(built):
-            fmap = self.pf.field_map
-            batch.add_all(built, lambda d: add_note(self.mw.col, d, deck, notetype, fmap), self.result)
+            def guarded(fn):
+                def inner(arg):
+                    self._busy = False
+                    self.start_btn.setEnabled(True)
+                    if self.mw.col is None:
+                        return  # profile closed meanwhile: nothing to write to
+                    fn(arg)
+                return inner
+
+            QueryOp(parent=self, op=lambda _c: work(), success=guarded(ok)).failure(
+                guarded(fail)).with_progress("Сборка карточек...").run_in_background()
+
+        def done(res):
+            self.total = batch.merge_results(self.total, res, self._retrying)
+            self._retrying = []
             self._show_report()
 
-        def fail(e):
-            showWarning("Сборка карточек прервана: %s" % e)
-            self._show_report()
+        batch.run_batch(
+            picks, lambda w: find_duplicate(col, deck, w),
+            lambda w, o: build_draft(w, o, settings),
+            lambda d: add_note(self.mw.col, d, deck, notetype, fmap),
+            result, run_bg, done, progress)
 
-        self.stack.setCurrentIndex(PAGE_INPUT)
-        QueryOp(parent=self, op=op, success=ok).failure(fail).with_progress("Сборка карточек...").run_in_background()
+    def reject(self):
+        if self._busy:
+            return  # a batch is being built: closing would lose its report
+        super().reject()
+
+    def closeEvent(self, e):
+        if self._busy:
+            e.ignore()
+            return
+        super().closeEvent(e)
 
     # ---- page 3: report
     def _make_report(self):
@@ -256,10 +276,10 @@ class MainDialog(QDialog):
 
     def _show_report(self):
         import html
-        out = self.result.outcomes
-        parts = ["<p><b>%s</b></p>" % html.escape(m) for m in self.result.warnings]
-        if self.state and self.state.skipped:
-            parts.append("<p>Пропущено вами: %s</p>" % html.escape(", ".join(self.state.skipped)))
+        out = self.total.outcomes
+        parts = ["<p><b>%s</b></p>" % html.escape(m) for m in self.total.warnings]
+        if self.skipped_all:
+            parts.append("<p>Пропущено вами: %s</p>" % html.escape(", ".join(self.skipped_all)))
         for title, lines in batch.report_text(out):
             parts.append("<h3>%s</h3><ul>%s</ul>" % (
                 html.escape(title), "".join("<li>%s</li>" % html.escape(x) for x in lines)))
@@ -270,8 +290,9 @@ class MainDialog(QDialog):
         self.stack.setCurrentIndex(PAGE_REPORT)
 
     def _retry(self):
-        words = batch.retry_words(self.result.outcomes)
+        words = batch.retry_words(self.total.outcomes)
         if words:
+            self._retrying = words
             self._open_state(words)
 
 

@@ -203,6 +203,44 @@ def add_all(built, add: Callable, result: BatchResult) -> None:
             result.outcomes.append(Outcome(p.word, CREATED))
 
 
+def run_batch(picks: List[Pick], find_dup: Callable, build: Callable, add: Callable,
+              result: BatchResult, run_bg: Callable, done: Callable[[BatchResult], None],
+              progress: Callable = None) -> None:
+    """The whole sequence; the dialog and the tests both call exactly this.
+
+    split_duplicates (main) -> build_drafts via run_bg (background) ->
+    add_all (main) -> done(result). `run_bg(work, ok, fail)` runs work() off
+    the main thread and calls ok(value) or fail(exc) back on it; tests pass
+    a synchronous one. If the background step fails, the picks that were to
+    be built become NOT_PROCESSED (retryable).
+    """
+    rest = split_duplicates(picks, find_dup, result)
+    if not rest:
+        done(result)
+        return
+
+    def ok(built):
+        add_all(built, add, result)
+        done(result)
+
+    def fail(e):
+        result.warnings.append("Сборка карточек прервана: %s" % e)
+        for p in rest:
+            result.outcomes.append(Outcome(p.word, NOT_PROCESSED, ["сборка прервана: %s" % e]))
+        done(result)
+
+    run_bg(lambda: build_drafts(rest, build, progress), ok, fail)
+
+
+def merge_results(prev: BatchResult, new: BatchResult, retried: List[str]) -> BatchResult:
+    """After a retry: earlier outcomes stay, except for the retried words."""
+    again = set(retried)
+    return BatchResult(
+        [o for o in prev.outcomes if o.word not in again] + new.outcomes,
+        prev.warnings + new.warnings,
+    )
+
+
 def group_report(outcomes: List[Outcome]) -> Dict[str, List[Outcome]]:
     return {
         "created": [o for o in outcomes if o.status == CREATED],

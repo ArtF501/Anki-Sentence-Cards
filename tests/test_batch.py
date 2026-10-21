@@ -24,7 +24,6 @@ def test_manual_occurrence_with_and_without_word():
     o = b.manual_occurrence("reluctant", "He was  reluctant.")
     assert mark_match(o) == "He was <b>reluctant</b>."
     o = b.manual_occurrence("reluctant", "Nothing here.")
-    assert mark_match(o) == "Nothing here."
     assert "<b>" not in b.highlight_html(o)
 
 
@@ -102,15 +101,25 @@ class FakeCol:
         return S(fields=[nid])
 
 
-def run(words, col, builder=None, field_map=None):
-    """Same sequence the dialog runs: split (main), build (bg), add (main)."""
+def sync_bg(work, ok, fail):
+    try:
+        v = work()
+    except Exception as e:
+        fail(e)
+        return
+    ok(v)
+
+
+def run(words, col, builder=None, field_map=None, run_bg=sync_bg):
+    """Calls batch.run_batch, the very function the dialog calls."""
     from anki_sentence_cards.notes import find_duplicate
     fmap = field_map or {"front": "Front"}
     picks = [b.Pick(w, occ()) for w in words]
     res = b.BatchResult()
-    rest = b.split_duplicates(picks, lambda w: find_duplicate(col, "D", w), res)
-    built = b.build_drafts(rest, builder or (lambda w, o: draft(w)))
-    b.add_all(built, lambda d: add_note(col, d, "D", "N", fmap), res)
+    seen = []
+    b.run_batch(picks, lambda w: find_duplicate(col, "D", w), builder or (lambda w, o: draft(w)),
+                lambda d: add_note(col, d, "D", "N", fmap), res, run_bg, seen.append)
+    assert seen == [res]  # done called exactly once
     return res
 
 
@@ -141,17 +150,40 @@ def test_pipeline_dup_check_broken_warns_once_and_words_not_failed():
 
 
 def test_pipeline_note_error_marks_word_and_continues():
-    col = FakeCol(reject=["x <b>w</b>"])
     bad = lambda w, o: draft(w) if w != "a" else CardDraft("a", {"front": "<b></b>"})
     res = run(["a", "b"], FakeCol(), bad)
     assert status(res) == {"a": b.FAILED, "b": b.CREATED}
-    assert "Front" in res.outcomes[0].reasons[0] or "лицев" in res.outcomes[0].reasons[0]
+    assert "лицев" in res.outcomes[0].reasons[0]
 
 
-def test_pipeline_unexpected_exception_in_add():
-    col = FakeCol(reject=["x <b>w</b>"])  # col.add_note raises RuntimeError -> NoteError
-    res = run(["a"], col)
-    assert status(res) == {"a": b.FAILED}
+def test_pipeline_non_noteerror_exception_marks_word_and_continues():
+    col = FakeCol()
+    calls = []
+
+    def decks_id(name):
+        calls.append(name)
+        if len(calls) == 1:
+            raise ValueError("deck broke")
+        return 1
+    col.decks = S(id=decks_id)
+    res = run(["a", "b"], col)
+    assert status(res) == {"a": b.FAILED, "b": b.CREATED}
+    assert "deck broke" in res.outcomes[0].reasons[0]
+
+
+def test_background_failure_leaves_words_retryable():
+    def bg(work, ok, fail):
+        fail(RuntimeError("boom"))
+    res = run(["a", "b"], FakeCol(), run_bg=bg)
+    assert set(status(res).values()) == {b.NOT_PROCESSED}
+    assert b.retry_words(res.outcomes) == ["a", "b"] and res.warnings
+
+
+def test_merge_results_keeps_earlier_run():
+    prev = b.BatchResult([b.Outcome("a", b.CREATED), b.Outcome("d", b.FAILED, ["x"])], ["w1"])
+    new = b.BatchResult([b.Outcome("d", b.CREATED)], ["w2"])
+    m = b.merge_results(prev, new, ["d"])
+    assert status(m) == {"a": b.CREATED, "d": b.CREATED} and m.warnings == ["w1", "w2"]
 
 
 def test_pipeline_notetype_missing_stops_batch():

@@ -109,3 +109,8 @@ def test_reverse_forms_find_sentences():
     assert _n(["a cat sat"], "cats") == 1
     assert _n(["she love it"], "loved") == 1
     assert _n(["He is make it."], "making") == 1
+
+
+def test_mark_match_without_match_has_no_empty_bold():
+    from anki_sentence_cards.book.search import Occurrence, mark_match
+    assert mark_match(Occurrence(0, "Nothing here.", "", 0, 0, False)) == "Nothing here."
