@@ -136,25 +136,23 @@ def _single_forms(w: str) -> List[str]:
         forms += _IRREGULAR[base]
     if w in _NO_REVERSE:
         return forms + [w + "s"]
-    if w.endswith("ing") and len(w) > 5:
+    if w.endswith("ing") and len(w) > 4:
         stem = w[:-3]
-        if len(stem) >= 4:
-            forms += [stem, stem + "e"]
+        forms += [stem, stem + "e"]
         if stem[-1] == stem[-2]:
             forms.append(stem[:-1])
-    if w.endswith("ied") and len(w) > 5:
+    if w.endswith("ied") and len(w) > 4:
         forms.append(w[:-3] + "y")
     elif w.endswith("ed") and len(w) > 4:
         stem = w[:-2]
-        if len(stem) >= 4:
-            forms += [stem, stem + "e"]
+        forms += [stem, stem + "e"]
         if stem[-1] == stem[-2]:
             forms.append(stem[:-1])
-    if w.endswith("ies") and len(w) > 5:
+    if w.endswith("ies") and len(w) > 4:
         forms.append(w[:-3] + "y")
-    elif w.endswith("es") and len(w) > 5:
+    elif w.endswith("es") and len(w) > 4:
         forms.append(w[:-2])
-    if w.endswith("s") and len(w) > 4 and not w.endswith("ss"):
+    if w.endswith("s") and len(w) > 3 and not w.endswith("ss"):
         forms.append(w[:-1])
 
     if len(w) > 1 and w[-1] == "y" and w[-2] not in _VOWELS:

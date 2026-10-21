@@ -93,3 +93,19 @@ def test_irregular_verbs():
 def test_exact_form_preferred_within_sentence():
     occ, _ = find_occurrences(["He ran and I run."], "run", 50)
     assert occ[0].matched_form == "run" and occ[0].exact is True
+
+
+def test_reverse_forms_from_printed_inflection():
+    for inflected, base in [
+        ("making", "make"), ("taking", "take"), ("using", "use"),
+        ("loved", "love"), ("liked", "like"), ("cats", "cat"),
+        ("dogs", "dog"), ("boxes", "box"), ("tries", "try"),
+        ("tied", "tie"), ("dies", "die"), ("sees", "see"),
+    ]:
+        assert base in word_forms(inflected), (inflected, base)
+
+
+def test_reverse_forms_find_sentences():
+    assert _n(["a cat sat"], "cats") == 1
+    assert _n(["she love it"], "loved") == 1
+    assert _n(["He is make it."], "making") == 1
