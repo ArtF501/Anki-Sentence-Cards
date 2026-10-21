@@ -141,8 +141,8 @@ def _single_forms(w: str) -> List[str]:
         forms += [stem, stem + "e"]
         if stem[-1] == stem[-2]:
             forms.append(stem[:-1])
-    if w.endswith("ied") and len(w) > 4:
-        forms.append(w[:-3] + "y")
+    if w.endswith("ied") and len(w) > 3:
+        forms += [w[:-3] + "y", w[:-1]]
     elif w.endswith("ed") and len(w) > 4:
         stem = w[:-2]
         forms += [stem, stem + "e"]
