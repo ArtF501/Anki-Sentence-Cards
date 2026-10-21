@@ -49,6 +49,8 @@ def resolve_field_map(notetype_fields: List[str], saved: Dict[str, str]) -> Tupl
     result: Dict[str, str] = {}
     unresolved: List[str] = []
     for key, default in DEFAULT_FIELD_NAMES.items():
+        if saved.get(key) == "" and key != "front":
+            continue  # explicit 'do not fill': respected, not unresolved
         found = None
         for cand in (saved.get(key), default):
             if cand and cand in fields:
@@ -65,6 +67,17 @@ def resolve_field_map(notetype_fields: List[str], saved: Dict[str, str]) -> Tupl
         else:
             result[key] = found
     return result, unresolved
+
+
+def plan_field_map(fields: List[str], saved: Dict[str, str], map_notetype: str,
+                   new_notetype: str) -> Tuple[Dict[str, str], List[str]]:
+    """Map to keep and unresolved keys for new_notetype.
+
+    A saved map built for another note type is dropped, never reused.
+    """
+    keep = dict(saved) if map_notetype == new_notetype else {}
+    _, unresolved = resolve_field_map(fields, keep)
+    return keep, unresolved
 
 
 def note_tags(missing: List[str]) -> List[str]:

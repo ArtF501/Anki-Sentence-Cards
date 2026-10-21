@@ -7,6 +7,7 @@ except ImportError:  # running outside Anki (tests)
 if mw is not None:
     from .ui.settings_dialog import open_settings
 
-    _action = QAction("Anki Sentence Cards: Настройки", mw)
+    menu = mw.form.menuTools.addMenu("Anki Sentence Cards")  # task 11 adds its item here
+    _action = QAction("Настройки", mw)
     _action.triggered.connect(lambda: open_settings(mw))
-    mw.form.menuTools.addAction(_action)
+    menu.addAction(_action)

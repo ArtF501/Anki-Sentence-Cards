@@ -4,6 +4,7 @@ from typing import Dict, List, Tuple
 
 # Combo item meaning 'leave this note field empty'.
 NOT_FILLED = ""
+TTS_LANGS = ("en-GB", "en-US")
 
 
 @dataclass
@@ -18,18 +19,43 @@ class Settings:
     occurrence_limit: int = 50
 
 
-def load_settings(raw: dict) -> Settings:
+def _str(v, default: str) -> str:
+    return v if isinstance(v, str) else default
+
+
+def load_settings(raw) -> Settings:
+    """Build Settings from a possibly damaged config; bad values fall back."""
     d = Settings()
+    if not isinstance(raw, dict):
+        raw = {}
+    books = raw.get("books")
+    books = [b for b in books if isinstance(b, str) and b] if isinstance(books, list) else []
+    fm = raw.get("field_map")
+    fm = {k: v for k, v in fm.items() if isinstance(k, str) and isinstance(v, str)} if isinstance(fm, dict) else {}
+    lang = raw.get("tts_lang")
+    try:
+        limit = int(raw.get("occurrence_limit", d.occurrence_limit))
+    except (TypeError, ValueError):
+        limit = d.occurrence_limit
+    if isinstance(raw.get("occurrence_limit"), bool) or limit < 1:
+        limit = d.occurrence_limit
     return Settings(
-        books=list(raw.get("books", d.books)),
-        active_book=raw.get("active_book", d.active_book),
-        deck=raw.get("deck", d.deck),
-        notetype=raw.get("notetype", d.notetype),
-        field_map=dict(raw.get("field_map", d.field_map)),
-        deepl_key=raw.get("deepl_key", d.deepl_key),
-        tts_lang=raw.get("tts_lang", d.tts_lang),
-        occurrence_limit=int(raw.get("occurrence_limit", d.occurrence_limit)),
+        books=books,
+        active_book=_str(raw.get("active_book"), d.active_book),
+        deck=_str(raw.get("deck"), d.deck),
+        notetype=_str(raw.get("notetype"), d.notetype),
+        field_map=fm,
+        deepl_key=_str(raw.get("deepl_key"), d.deepl_key),
+        tts_lang=lang if lang in TTS_LANGS else d.tts_lang,
+        occurrence_limit=limit,
     )
+
+
+def normalize_active(books: List[str], active: str) -> str:
+    """Active book must be one of books; otherwise the first (or empty)."""
+    if active in books:
+        return active
+    return books[0] if books else ""
 
 
 def to_dict(s: Settings) -> dict:
@@ -70,9 +96,9 @@ def remove_book(books: List[str], active: str, path: str) -> Tuple[List[str], st
 
 
 def build_field_map(choices: Dict[str, str]) -> Tuple[Dict[str, str], bool]:
-    """Drop 'not filled' entries; second value is False when front is missing.
+    """Keep 'not filled' as an explicit "" entry so it survives a reload.
 
-    Only front is mandatory (ruling N7); other keys may stay empty.
+    Second value is False when front is missing. Only front is mandatory
+    (ruling N7); other keys may be disabled.
     """
-    result = {k: v for k, v in choices.items() if v != NOT_FILLED}
-    return result, "front" in result
+    return dict(choices), bool(choices.get("front"))

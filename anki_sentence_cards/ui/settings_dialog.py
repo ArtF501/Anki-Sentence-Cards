@@ -4,8 +4,12 @@ from aqt.qt import (
     QHBoxLayout, QLabel, QLineEdit, QPushButton, QRadioButton, QVBoxLayout, QWidget,
 )
 
-from ..notes import resolve_field_map
-from ..settings import Settings, add_book, load_settings, merge_for_save, remove_book
+from aqt.utils import showWarning
+
+from ..notes import plan_field_map, resolve_field_map
+from ..settings import (
+    add_book, load_settings, merge_for_save, normalize_active, remove_book,
+)
 from .field_map_dialog import open_field_map
 
 
@@ -37,6 +41,8 @@ class SettingsDialog(QDialog):
         self.setMinimumWidth(520)
         self._raw = mw.addonManager.getConfig(_addon(mw)) or {}
         self.s = load_settings(self._raw)
+        self.s.active_book = normalize_active(self.s.books, self.s.active_book)
+        self._map_notetype = self.s.notetype  # note type the current field_map was built for
 
         root = QVBoxLayout(self)
         root.addWidget(QLabel("Книги (отметьте активную):"))
@@ -120,14 +126,13 @@ class SettingsDialog(QDialog):
         fields = _notetype_fields(self.mw, notetype)
         if fields is None:
             return
-        saved = self.s.field_map if notetype == self.s.notetype else {}
-        _, unresolved = resolve_field_map(fields, saved)
-        if notetype != self.s.notetype:
-            self.s.field_map = {}  # old map belongs to another note type
+        keep, unresolved = plan_field_map(fields, self.s.field_map, self._map_notetype, notetype)
         if unresolved or force:
-            chosen = open_field_map(self.mw, fields, saved)
+            chosen = open_field_map(self.mw, fields, keep)
             if chosen is not None:
-                self.s.field_map = chosen
+                keep = chosen
+        self.s.field_map = keep
+        self._map_notetype = notetype
 
     def _save(self) -> None:
         self._run_field_map(force=False)
@@ -136,6 +141,9 @@ class SettingsDialog(QDialog):
         self.s.deepl_key = self._key.text().strip()
         self.s.tts_lang = self._lang.currentText()
         self.mw.addonManager.writeConfig(_addon(self.mw), merge_for_save(self._raw, self.s))
+        fields = _notetype_fields(self.mw, self.s.notetype)
+        if fields is not None and "front" in resolve_field_map(fields, self.s.field_map)[1]:
+            showWarning("Поле front не сопоставлено: карточки создаваться не будут, пока вы его не выберете.")
         self.accept()
 
 
