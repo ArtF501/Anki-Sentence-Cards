@@ -44,9 +44,15 @@ class _Reverso(HTMLParser):
         self.field = None      # "term" / "hint" while inside that span
         self.span_depth = 0    # nesting inside the current field span
         self.term_done = False
+        self.broken = False
         self.hint_done = False
         self.term = ""
         self.hint = ""
+
+    def _abort(self):
+        """Anchor boundary reached while a field span is still open: broken markup."""
+        self.broken = True
+        self.done = True
 
     def handle_starttag(self, tag, attrs):
         a = dict(attrs)
@@ -56,7 +62,9 @@ class _Reverso(HTMLParser):
         if not self.depth_content or self.done:
             return
         if self.field:
-            if tag == "span":
+            if tag == "a" and "translation" in classes:
+                self._abort()
+            elif tag == "span":
                 self.span_depth += 1
         elif tag == "a" and "translation" in classes:
             if self.in_anchor:  # previous anchor never closed
@@ -77,7 +85,9 @@ class _Reverso(HTMLParser):
                 else:
                     self.hint_done = True
                 self.field = None
-        elif tag == "a" and self.in_anchor and not self.field:
+        elif tag == "a" and self.in_anchor:
+            if self.field:
+                self._abort()
             self.in_anchor = False
             self.done = True
         elif tag == "div" and self.depth_content:
@@ -105,7 +115,7 @@ def _parse_reverso(html: bytes) -> Tuple[str, str]:
         raise SourceError("Reverso: не удалось разобрать страницу")
     term = " ".join(p.term.split())
     hint = " ".join(p.hint.split())
-    if not _plausible(term):
+    if p.broken or not _plausible(term):
         raise SourceError("Reverso: вёрстка не распознана")
     if _BAD.search(hint) or len(hint) > 40:
         hint = ""

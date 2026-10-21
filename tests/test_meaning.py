@@ -146,3 +146,13 @@ def test_fallback_rejects_overlong_translation(net):
 def test_reverso_path_with_empty_definition_and_no_entry(net):
     assert get_meaning("w", "", DictEntry("noun", "", "")).text == "(modern time) современник"
     assert get_meaning("w", "", None).text == "(modern time) современник"
+
+
+def test_unclosed_inner_span_does_not_glue_terms():
+    html = _page('<a class="translation"><span class="display-term">слово<span>x</a>'
+                 '<a class="translation"><span class="display-term">другое</span></a>')
+    try:
+        _, term = meaning._parse_reverso(html)
+    except SourceError:
+        return
+    assert term == "слово"
