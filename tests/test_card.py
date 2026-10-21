@@ -155,3 +155,22 @@ def test_sources_receive_right_arguments(src):
     assert c["mean"][0] == ("give up", "KEY", None)
     assert c["audio"][0] == ("give up", "en-US")
     assert "dict" not in c
+
+
+def test_malformed_dict_entry_is_isolated(src):
+    src["dict"] = object()
+    d = build_draft("smoking", occ_for("smoking"), Settings())
+    assert {"pos", "ipa"} <= set(d.missing)
+    assert d.values["front"] and d.values["sound"]
+
+
+def test_none_dict_entry_is_missing(src):
+    src["dict"] = None
+    d = build_draft("smoking", occ_for("smoking"), Settings())
+    assert {"pos", "ipa"} <= set(d.missing) and len(d.errors) == 1
+
+
+def test_unexpected_exception_is_logged(src, caplog):
+    src["tr"] = RuntimeError("boom")
+    build_draft("smoking", occ_for("smoking"), Settings())
+    assert any(r.exc_info and "boom" in str(r.exc_info[1]) for r in caplog.records)

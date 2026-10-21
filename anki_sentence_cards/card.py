@@ -5,6 +5,7 @@ field empty, records why, and never stops the card or the batch.
 """
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
@@ -12,6 +13,8 @@ from .book.search import Occurrence, mark_match
 from .settings import Settings
 from .sources import dictionary, meaning, translate, tts
 from .sources.http import SourceError
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -38,6 +41,7 @@ def _guard(draft: CardDraft, keys, label: str, fn):
     except SourceError as e:
         _fail(draft, keys, label, str(e))
     except Exception:
+        log.exception("card source %r failed for word %r", label, draft.word)
         _fail(draft, keys, label, "внутренняя ошибка")
     return None
 
@@ -61,16 +65,23 @@ def build_draft(word: str, occ: Occurrence, settings: Settings) -> CardDraft:
     if len(word.split()) > 1:
         d.values["pos"] = "phrase"
     else:
-        entry = _guard(d, ["pos", "ipa"], "словарь", lambda: dictionary.lookup(word))
-        if entry is not None:
-            if (entry.part_of_speech or "").strip():
-                d.values["pos"] = entry.part_of_speech
+        def do_lookup():
+            e = dictionary.lookup(word)
+            if e is None:
+                raise SourceError("словарь ничего не вернул")
+            pos = (e.part_of_speech or "").strip()
+            ipa = (e.ipa or "").strip()
+            if pos:
+                d.values["pos"] = e.part_of_speech
             else:
                 _fail(d, ["pos"], "часть речи", "словарь не дал часть речи")
-            if (entry.ipa or "").strip():
-                d.values["ipa"] = entry.ipa
+            if ipa:
+                d.values["ipa"] = e.ipa
             else:
                 _fail(d, ["ipa"], "транскрипция", "словарь не дал транскрипцию")
+            return e
+
+        entry = _guard(d, ["pos", "ipa"], "словарь", do_lookup)
 
     def do_meaning():
         m = meaning.get_meaning(word, settings.deepl_key, entry)
