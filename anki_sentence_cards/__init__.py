@@ -7,18 +7,6 @@ except ImportError:  # running outside Anki (tests)
 
 _menu = None
 
-if mw is not None:
-    from .ui.settings_dialog import open_settings
-
-    _menu = mw.form.menuTools.addMenu("Anki Sentence Cards")
-    _action = QAction("Настройки", mw)
-    _action.triggered.connect(lambda: open_settings(mw))
-    _menu.addAction(_action)
-
-    from .ui.main_dialog import register
-    register(mw)
-
-
 def get_menu():
     """The add-on's Tools submenu, or None outside Anki.
 
@@ -34,3 +22,17 @@ def get_menu():
                 menu.addAction(action)
     """
     return _menu
+
+
+if mw is not None:
+    from .ui.settings_dialog import open_settings
+
+    _menu = mw.form.menuTools.addMenu("Anki Sentence Cards")
+    _action = QAction("Настройки", mw)
+    _action.triggered.connect(lambda: open_settings(mw))
+    _menu.addAction(_action)
+
+    from .ui.main_dialog import register
+    register(mw)
+
+
