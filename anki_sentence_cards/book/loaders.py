@@ -111,9 +111,33 @@ def _ensure_typing_extensions() -> None:
         sys.modules["typing_extensions"] = vendored
 
 
+def _ensure_pypdf():
+    """Return a usable pypdf module.
+
+    pypdf's own modules import each other absolutely (`from pypdf._utils
+    import ...`), so importing the vendored copy as
+    `anki_sentence_cards.vendor.pypdf` is not enough: those inner imports
+    look for a top-level `pypdf` and fail with ModuleNotFoundError. Put the
+    vendor directory on sys.path so the name resolves, appending rather
+    than inserting so an environment that already ships pypdf keeps its own.
+    """
+    try:
+        import pypdf  # Anki's own, or another add-on's
+
+        return pypdf
+    except ImportError:
+        pass
+    vendor = str(Path(__file__).resolve().parent.parent / "vendor")
+    if vendor not in sys.path:
+        sys.path.append(vendor)
+    import pypdf
+
+    return pypdf
+
+
 def _load_pdf(path: Path) -> str:
     _ensure_typing_extensions()
-    from ..vendor import pypdf
+    pypdf = _ensure_pypdf()
 
     reader = pypdf.PdfReader(str(path))
     return "\n".join(page.extract_text() or "" for page in reader.pages)
