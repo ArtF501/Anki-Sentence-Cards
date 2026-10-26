@@ -5,7 +5,7 @@ from anki_sentence_cards.book.search import Occurrence
 from anki_sentence_cards.card import build_draft
 from anki_sentence_cards.settings import Settings
 from anki_sentence_cards.sources import dictionary, meaning, translate, tts
-from anki_sentence_cards.sources.dictionary import DictEntry
+from anki_sentence_cards.sources.roles import Role, WordData
 from anki_sentence_cards.sources.http import SourceError
 from anki_sentence_cards.sources.meaning import Meaning
 
@@ -21,7 +21,7 @@ def occ_for(form):
 @pytest.fixture
 def src(monkeypatch):
     s = {"tr": translate.Translation("Ему пришлось бросить курить.", "google"),
-         "dict": DictEntry("verb", "ɡɪv", "stop doing"),
+         "dict": WordData([Role("verb", "ɡɪv", "stop doing")]),
          "mean": Meaning("(verb) stop - бросить", "reverso"),
          "audio": b"MP3DATA", "lookups": []}
 
@@ -100,16 +100,16 @@ def test_meaning_failure_is_isolated(src):
     assert d.values["translate"] and d.values["sound"]
 
 
-def test_dictionary_failure_still_gives_meaning_with_no_entry(src, monkeypatch):
+def test_dictionary_failure_still_gives_meaning_with_no_definition(src, monkeypatch):
     seen = []
     src["dict"] = SourceError("нет")
     monkeypatch.setattr(meaning, "get_meaning", lambda w, k, e: seen.append(e) or Meaning("m", "x"))
     d = build_draft("smoking", occ_for("smoking"), Settings())
-    assert seen == [None] and d.values["meaning"] == "m"
+    assert seen == [""] and d.values["meaning"] == "m"
 
 
 def test_empty_ipa_is_missing_but_pos_kept(src):
-    src["dict"] = DictEntry("verb", "", "def")
+    src["dict"] = WordData([Role("verb", "", "def")])
     d = build_draft("smoking", occ_for("smoking"), Settings())
     assert d.values["pos"] == "verb" and d.values["ipa"] == ""
     assert d.missing == ["ipa"] and d.errors
@@ -142,7 +142,7 @@ def test_failed_lookup_gives_one_error_two_missing(src):
 
 
 def test_empty_pos_is_missing(src):
-    src["dict"] = DictEntry("", "ɡɪv", "def")
+    src["dict"] = WordData([Role("", "ɡɪv", "def")])
     d = build_draft("smoking", occ_for("smoking"), Settings())
     assert d.values["pos"] == "" and d.missing == ["pos"]
 
@@ -152,7 +152,7 @@ def test_sources_receive_right_arguments(src):
     build_draft("give up", occ_for("give up"), st)
     c = src["calls"]
     assert c["tr"][0] == (SENT, "KEY")
-    assert c["mean"][0] == ("give up", "KEY", None)
+    assert c["mean"][0] == ("give up", "KEY", "")
     assert c["audio"][0] == ("give up", "en-US")
     assert "dict" not in c
 

@@ -3,13 +3,12 @@ from pathlib import Path
 import pytest
 
 from anki_sentence_cards.sources import http, meaning, translate
-from anki_sentence_cards.sources.dictionary import DictEntry
 from anki_sentence_cards.sources.http import SourceError
 from anki_sentence_cards.sources.meaning import Meaning, get_meaning
 
 FIX = Path(__file__).parent / "fixtures"
 DEFN = "person or thing considered modern or current"
-ENTRY = DictEntry("adjective", "x", DEFN)
+ENTRY = DEFN
 
 
 @pytest.fixture
@@ -71,21 +70,21 @@ def test_falls_back_to_dictionary_plus_translator_when_reverso_fails(net, page):
 
 def test_fallback_keeps_the_same_three_part_shape(net):
     net["page"] = SourceError("down")
-    e = DictEntry("noun", "", "modern period of time")
+    e = "modern period of time"
     assert get_meaning("w", "", e).text == "(modern period) modern period of time - современник"
 
 
 def test_fallback_omits_parens_without_meaningful_hint(net):
     net["page"] = SourceError("down")
     assert get_meaning("w", "", ENTRY).text == DEFN + " - современник"
-    one = DictEntry("noun", "", "Run")
+    one = "Run"
     assert get_meaning("w", "", one).text == "Run - современник"
 
 
 def test_fallback_survives_empty_definition_and_missing_entry(net):
     net["page"] = SourceError("down")
-    assert get_meaning("w", "", DictEntry("noun", "", "")).text == "современник"
-    assert get_meaning("w", "", None).text == "современник"
+    assert get_meaning("w", "", "").text == "современник"
+    assert get_meaning("w", "", "").text == "современник"
 
 
 def test_fallback_rejects_junk_translation(net):
@@ -144,8 +143,8 @@ def test_fallback_rejects_overlong_translation(net):
 
 
 def test_reverso_path_with_empty_definition_and_no_entry(net):
-    assert get_meaning("w", "", DictEntry("noun", "", "")).text == "(modern time) современник"
-    assert get_meaning("w", "", None).text == "(modern time) современник"
+    assert get_meaning("w", "", "").text == "(modern time) современник"
+    assert get_meaning("w", "", "").text == "(modern time) современник"
 
 
 def test_unclosed_inner_span_does_not_glue_terms():

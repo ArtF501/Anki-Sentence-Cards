@@ -65,30 +65,31 @@ def build_draft(word: str, occ: Occurrence, settings: Settings,
 
     _guard(d, ["translate"], "перевод предложения", do_translate)
 
-    entry = None
+    definition = ""
     if len(word.split()) > 1:
         d.values["pos"] = "phrase"
     else:
         def do_lookup():
-            e = dictionary.lookup(word)
-            if e is None:
+            data = dictionary.lookup(word)
+            if data is None or not getattr(data, "roles", None):
                 raise SourceError("словарь ничего не вернул")
-            pos = (e.part_of_speech or "").strip()
-            ipa = (e.ipa or "").strip()
+            role = data.roles[0]
+            pos = (role.pos or "").strip()
+            ipa = (role.ipa or data.shared_ipa or "").strip()
             if pos:
-                d.values["pos"] = e.part_of_speech
+                d.values["pos"] = pos
             else:
                 _fail(d, ["pos"], "часть речи", "словарь не дал часть речи")
             if ipa:
-                d.values["ipa"] = e.ipa
+                d.values["ipa"] = ipa
             else:
                 _fail(d, ["ipa"], "транскрипция", "словарь не дал транскрипцию")
-            return e
+            return (role.definition or "").strip()
 
-        entry = _guard(d, ["pos", "ipa"], "словарь", do_lookup)
+        definition = _guard(d, ["pos", "ipa"], "словарь", do_lookup) or ""
 
     def do_meaning():
-        m = meaning.get_meaning(word, settings.deepl_key, entry)
+        m = meaning.get_meaning(word, settings.deepl_key, definition)
         if not (m.text or "").strip():
             raise SourceError("значение пустое")
         d.values["meaning"] = m.text

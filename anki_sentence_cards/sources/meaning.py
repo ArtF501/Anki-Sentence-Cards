@@ -8,11 +8,10 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from html.parser import HTMLParser
-from typing import Optional, Tuple
+from typing import Tuple
 from urllib.parse import quote
 
 from . import http, translate
-from .dictionary import DictEntry
 from .http import SourceError
 
 URL = "https://context.reverso.net/translation/english-russian/"
@@ -149,11 +148,11 @@ def _fallback(word: str, deepl_key: str, definition: str) -> str:
     return _compose(_fallback_hint(definition), definition, tr)
 
 
-def get_meaning(word: str, deepl_key: str, dict_entry: Optional[DictEntry]) -> Meaning:
+def get_meaning(word: str, deepl_key: str, definition: str = "") -> Meaning:
     word = (word or "").strip()
     if not word:
         raise SourceError("пустое слово")
-    definition = " ".join((dict_entry.definition if dict_entry else "").split())
+    definition = " ".join((definition or "").split())
     try:
         return Meaning(_reverso(word, definition), "reverso")
     except SourceError:

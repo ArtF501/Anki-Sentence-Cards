@@ -1,20 +1,14 @@
-"""Part of speech and IPA from dictionaryapi.dev (first, primary variant)."""
+"""Every role of a word from dictionaryapi.dev, with transcriptions tied to it."""
 from __future__ import annotations
 
-from dataclasses import dataclass
 from urllib.parse import quote
 
 from . import http
 from .http import SourceError
+from .roles import Role, WordData, merge_roles
 
 URL = "https://api.dictionaryapi.dev/api/v2/entries/en/"
-
-
-@dataclass
-class DictEntry:
-    part_of_speech: str
-    ipa: str
-    definition: str
+SOURCE = "dictionaryapi"
 
 
 def _text(value) -> str:
@@ -34,28 +28,55 @@ def _ipa(entry: dict) -> str:
     return ""  # no transcription: the field stays empty, the card is still made
 
 
-def parse_entry(payload) -> DictEntry:
-    if not isinstance(payload, list) or not payload or not isinstance(payload[0], dict):
-        raise SourceError("словарь вернул непонятный ответ")
-    entry = payload[0]
+def _entry_roles(entry: dict) -> list:
     meanings = entry.get("meanings")
-    if not isinstance(meanings, list) or not meanings or not isinstance(meanings[0], dict):
+    if not isinstance(meanings, list) or not meanings:
         raise SourceError("словарь вернул непонятный ответ")
-    meaning = meanings[0]
-    pos = _text(meaning.get("partOfSpeech")).lower()
-    defs = meaning.get("definitions", [])
-    if not isinstance(defs, list) or (defs and not isinstance(defs[0], dict)):
+    roles = []
+    for meaning in meanings:
+        if not isinstance(meaning, dict):
+            raise SourceError("словарь вернул непонятный ответ")
+        pos = _text(meaning.get("partOfSpeech")).lower()
+        defs = meaning.get("definitions", [])
+        if not isinstance(defs, list) or (defs and not isinstance(defs[0], dict)):
+            raise SourceError("словарь вернул непонятный ответ")
+        if not pos:
+            raise SourceError("словарь вернул неполный ответ")
+        definition = _text(defs[0].get("definition")) if defs else ""
+        roles.append(Role(pos, "", definition, "", SOURCE))
+    return roles
+
+
+def parse_entries(payload) -> WordData:
+    """All roles of the word, with the transcription pairing rule applied.
+
+    An entry's transcription belongs to a role only when the entry holds
+    exactly one role. Otherwise nothing says which of its roles the
+    transcription is for, so it becomes the word's shared transcription.
+    """
+    if not isinstance(payload, list) or not payload:
         raise SourceError("словарь вернул непонятный ответ")
-    definition = _text(defs[0].get("definition")) if defs else ""
-    if not pos:
+    roles = []
+    shared = ""
+    for entry in payload:
+        if not isinstance(entry, dict):
+            raise SourceError("словарь вернул непонятный ответ")
+        found = _entry_roles(entry)
+        ipa = _ipa(entry)
+        if len(found) == 1:
+            found[0].ipa = ipa
+        elif ipa and not shared:
+            shared = ipa
+        roles += found
+    if not roles:
         raise SourceError("словарь вернул неполный ответ")
-    return DictEntry(pos, _ipa(entry), definition)
+    return WordData(merge_roles(roles), shared)
 
 
-def lookup(word: str) -> DictEntry:
+def lookup(word: str) -> WordData:
     word = (word or "").strip()
     if not word:
         raise SourceError("пустое слово")
     if len(word.split()) != 1:
         raise SourceError("словарь работает только с одним словом")
-    return parse_entry(http.get_json(URL + quote(word, safe="")))
+    return parse_entries(http.get_json(URL + quote(word, safe="")))
