@@ -17,7 +17,7 @@ def load(name):
 def net(monkeypatch):
     state = {"payload": load("supervise"), "gets": []}
 
-    def get_json(url, params=None, headers=None, timeout=10.0):
+    def get_json(url, params=None, timeout=10.0, headers=None):
         state["gets"].append(url)
         if isinstance(state["payload"], Exception):
             raise state["payload"]
@@ -65,3 +65,39 @@ def test_strip_markup_unescapes_entities_and_squeezes_space():
 def test_unusable_payload_raises(bad):
     with pytest.raises(SourceError):
         wiktionary.parse_definitions(bad)
+
+
+def test_parse_ipa_takes_the_british_pronunciation():
+    assert wiktionary.parse_ipa("{{IPA|en|/ˈsuː.pə.vaɪz/|a=RP}}") == "ˈsuː.pə.vaɪz"
+
+
+def test_parse_ipa_prefers_rp_over_us():
+    text = "{{IPA|en|/ˈsuːpɚvaɪz/|a=US}}\n{{IPA|en|/ˈsuːpəvaɪz/|a=RP}}"
+    assert wiktionary.parse_ipa(text) == "ˈsuːpəvaɪz"
+
+
+def test_parse_ipa_returns_empty_on_unknown_shape():
+    assert wiktionary.parse_ipa("no templates here") == ""
+    assert wiktionary.parse_ipa("{{IPA|ru|/ˈsuːpəvaɪz/}}") == ""   # не английский раздел
+    assert wiktionary.parse_ipa("{{IPA|en|}}") == ""
+
+
+def test_parse_ipa_takes_the_first_when_nothing_is_marked_british():
+    assert wiktionary.parse_ipa("{{IPA|en|[ɹʌn]|/xx/}}") == "ɹʌn"
+
+
+def test_lookup_ipa_reads_the_wikitext_of_the_page(net):
+    net["payload"] = {"parse": {"wikitext": "{{IPA|en|/ɹʌn/|a=RP}}"}}
+    assert wiktionary.lookup_ipa("run") == "ɹʌn"
+    assert net["gets"] == [wiktionary.WIKITEXT_URL]
+
+
+def test_lookup_ipa_returns_empty_instead_of_raising_on_junk(net):
+    net["payload"] = {"parse": {"wikitext": {"*": "nothing"}}}
+    assert wiktionary.lookup_ipa("supervise") == ""
+
+
+def test_lookup_ipa_propagates_a_network_failure(net):
+    net["payload"] = SourceError("сервис ответил ошибкой 503")
+    with pytest.raises(SourceError):
+        wiktionary.lookup_ipa("supervise")

@@ -144,3 +144,14 @@ def test_build_field_map_detects_collision():
 
 def test_build_field_map_empty_choices_are_not_a_collision():
     assert build_field_map({"front": "Front", "ipa": NOT_FILLED, "pos": NOT_FILLED})[2] is False
+
+
+def test_wiktionary_ipa_defaults_to_true_on_junk():
+    assert load_settings({}).wiktionary_ipa is True
+    assert load_settings({"wiktionary_ipa": "нет"}).wiktionary_ipa is True
+    assert load_settings({"wiktionary_ipa": None}).wiktionary_ipa is True
+
+
+def test_wiktionary_ipa_can_be_switched_off():
+    assert load_settings({"wiktionary_ipa": False}).wiktionary_ipa is False
+    assert to_dict(load_settings({"wiktionary_ipa": False}))["wiktionary_ipa"] is False

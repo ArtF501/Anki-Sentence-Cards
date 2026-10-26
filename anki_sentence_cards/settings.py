@@ -17,6 +17,7 @@ class Settings:
     deepl_key: str = ""
     tts_lang: str = "en-GB"
     occurrence_limit: int = 50
+    wiktionary_ipa: bool = True
 
 
 def _str(v, default: str) -> str:
@@ -33,6 +34,7 @@ def load_settings(raw) -> Settings:
     fm = raw.get("field_map")
     fm = {k: v for k, v in fm.items() if isinstance(k, str) and isinstance(v, str)} if isinstance(fm, dict) else {}
     lang = raw.get("tts_lang")
+    wiki_ipa = raw.get("wiktionary_ipa")
     try:
         limit = int(raw.get("occurrence_limit", d.occurrence_limit))
     except (TypeError, ValueError, OverflowError):
@@ -48,6 +50,7 @@ def load_settings(raw) -> Settings:
         deepl_key=_str(raw.get("deepl_key"), d.deepl_key),
         tts_lang=lang if lang in TTS_LANGS else d.tts_lang,
         occurrence_limit=limit,
+        wiktionary_ipa=wiki_ipa if isinstance(wiki_ipa, bool) else d.wiktionary_ipa,
     )
 
 
@@ -68,6 +71,7 @@ def to_dict(s: Settings) -> dict:
         "deepl_key": s.deepl_key,
         "tts_lang": s.tts_lang,
         "occurrence_limit": s.occurrence_limit,
+        "wiktionary_ipa": s.wiktionary_ipa,
     }
 
 
