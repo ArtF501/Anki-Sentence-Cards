@@ -212,6 +212,27 @@ def word_forms(query: str) -> List[str]:
     return out
 
 
+MAX_BASE_FORMS = 3
+
+
+def base_form_candidates(word: str) -> List[str]:
+    """Shorter forms the word may have been inflected from, nearest first.
+
+    Only a guess: `tired` yields `tire`, which is a different word. The caller
+    labels what comes back and never silently treats it as the word itself.
+    """
+    words = normalize_query(word).lower().split()
+    if not words:
+        return []
+    head = words[0]
+    shorter = [
+        f for f in _dedupe(_single_forms(head))
+        if f != head and len(f) <= len(head) and len(f) >= 3
+    ]
+    shorter.sort(key=len, reverse=True)
+    return shorter[:MAX_BASE_FORMS]
+
+
 @dataclass
 class Occurrence:
     sentence_index: int
