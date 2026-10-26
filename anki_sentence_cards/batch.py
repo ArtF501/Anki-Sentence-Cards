@@ -117,9 +117,19 @@ class PickState:
         return True
 
 
+def _from_lemma(roles: List[Role]) -> bool:
+    return any(r.lemma for r in roles)
+
+
 def needs_choice(draft: CardDraft) -> bool:
-    """True when there is an actual choice to make: one variant is no choice."""
-    return len(draft.roles) > 1 or len(draft.meanings) > 1
+    """True when there is an actual choice to make: one variant is no choice.
+
+    A role borrowed from a base form is always shown even when it is the only
+    one: it carries another word's part of speech, and the user must see the
+    `(от …)` mark instead of getting it as a silent success.
+    """
+    return (len(draft.roles) > 1 or len(draft.meanings) > 1
+            or _from_lemma(draft.roles))
 
 
 def role_label(role: Role, shared_ipa: str = "") -> str:
@@ -179,7 +189,8 @@ class ChoiceState:
         return "%d из %d" % (min(self.index + 1, len(self.drafts)), len(self.drafts))
 
     def needs_role(self) -> bool:
-        return not self.done and len(self.current.roles) > 1
+        return not self.done and (len(self.current.roles) > 1
+                                  or _from_lemma(self.current.roles))
 
     def needs_meaning(self) -> bool:
         return not self.done and len(self.current.meanings) > 1
@@ -411,6 +422,21 @@ def group_report(outcomes: List[Outcome]) -> Dict[str, List[Outcome]]:
         "incomplete": [o for o in outcomes if o.status == INCOMPLETE],
         "not_created": [o for o in outcomes if o.status in (DUPLICATE, FAILED, NOT_PROCESSED)],
     }
+
+
+def report_plain(outcomes: List[Outcome], warnings: List[str],
+                skipped: List[str]) -> str:
+    """The same report as plain text, for when the window is already closed."""
+    parts = list(warnings)
+    if skipped:
+        parts.append("Пропущено вами: %s" % ", ".join(skipped))
+    groups = report_text(outcomes)
+    for title, lines in groups:
+        parts.append(title)
+        parts += ["  " + line for line in lines]
+    if not groups:
+        parts.append("Ничего не создано.")
+    return "\n".join(parts)
 
 
 def retry_words(outcomes: List[Outcome]) -> List[str]:

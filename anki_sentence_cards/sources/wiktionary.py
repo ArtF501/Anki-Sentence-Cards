@@ -12,7 +12,7 @@ from urllib.parse import quote
 
 from . import http
 from .http import SourceError
-from .roles import Role, WordData, merge_roles
+from .roles import Role, WordData, merge_roles, normalize_pos
 
 DEFINITION_URL = "https://en.wiktionary.org/api/rest_v1/page/definition/"
 WIKITEXT_URL = "https://en.wiktionary.org/w/api.php"
@@ -45,7 +45,7 @@ def parse_definitions(payload) -> WordData:
     for section in sections:
         if not isinstance(section, dict):
             continue
-        pos = strip_markup(section.get("partOfSpeech", "")).lower()
+        pos = normalize_pos(strip_markup(section.get("partOfSpeech", "")))
         if not pos:
             continue
         defs = section.get("definitions")

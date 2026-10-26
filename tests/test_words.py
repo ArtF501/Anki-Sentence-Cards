@@ -145,3 +145,26 @@ def test_fetch_word_data_honours_the_wiktionary_ipa_switch(live):
     assert fetch_word_data("cats", Settings(wiktionary_ipa=False)).shared_ipa == ""
     assert live["ipa"] == []
     assert fetch_word_data("cats", Settings(wiktionary_ipa=True)).shared_ipa == "ɹʌn"
+
+
+def test_lemma_transcription_fills_the_same_part_of_speech_of_the_word():
+    """supervised: своя роль без транскрипции берёт её у supervise — та же часть речи."""
+    def primary(w):
+        if w == "supervised":
+            return WordData([Role("verb", "", "past of supervise", source="a")])
+        return WordData([Role("verb", "ˈsuːpəvaɪz", "To oversee and direct.", source="a")])
+
+    data = collect_roles("supervised", [primary], candidates=["supervise"])
+    assert [(r.pos, r.ipa, r.lemma) for r in data.roles] == [
+        ("verb", "ˈsuːpəvaɪz", ""), ("verb", "ˈsuːpəvaɪz", "supervise")]
+
+
+def test_lemma_transcription_never_crosses_to_another_part_of_speech():
+    """tired — adjective, tire — noun: /taɪə/ не имеет права переехать на tired."""
+    def primary(w):
+        if w == "tired":
+            return WordData([Role("adjective", "", "worn out", source="a")])
+        return WordData([Role("noun", "taɪə", "rubber ring", source="a")])
+
+    data = collect_roles("tired", [primary], candidates=["tire"])
+    assert [(r.pos, r.ipa) for r in data.roles] == [("adjective", ""), ("noun", "taɪə")]

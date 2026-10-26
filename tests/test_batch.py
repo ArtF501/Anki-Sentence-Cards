@@ -513,3 +513,29 @@ def test_run_batch_passes_workers_and_should_stop_to_the_build():
     finally:
         mod.build_drafts = real
     assert got == {"workers": 3, "should_stop": stop}
+
+
+def test_choice_a_single_role_from_a_base_form_is_always_shown():
+    """Одна роль, и та от другого слова: пользователь обязан это увидеть."""
+    d = choice_draft(roles=["noun"], meanings=1, word="tired")
+    d.roles[0].lemma = "tire"
+    assert b.needs_choice(d) is True
+    st = b.ChoiceState([d])
+    assert st.needs_role() and st.role_labels() == ["noun  (от tire)"]
+
+
+def test_choice_a_single_role_of_the_word_itself_is_not_shown():
+    assert b.needs_choice(choice_draft(roles=["noun"], meanings=1)) is False
+
+
+def test_report_plain_carries_warnings_skipped_and_every_group():
+    out = [b.Outcome("a", b.CREATED), b.Outcome("c", b.FAILED, ["перерыв прерван"])]
+    text = b.report_plain(out, ["Партия остановлена: нет типа"], ["b"])
+    assert "Партия остановлена: нет типа" in text
+    assert "Пропущено вами: b" in text
+    assert "Создано (1)" in text and "a" in text
+    assert "Не создано (1)" in text and "c — перерыв прерван" in text
+
+
+def test_report_plain_says_so_when_nothing_was_created():
+    assert b.report_plain([], [], []) == "Ничего не создано."

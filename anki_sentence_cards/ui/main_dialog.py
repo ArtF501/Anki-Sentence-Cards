@@ -11,7 +11,7 @@ from aqt.qt import (
     QDialog, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QPlainTextEdit,
     QPushButton, QSize, QStackedWidget, Qt, QVBoxLayout, QWidget,
 )
-from aqt.utils import showWarning
+from aqt.utils import askUser, showText, showWarning
 
 from .. import batch
 from ..book.library import load_book
@@ -281,26 +281,38 @@ class MainDialog(QDialog):
             workers=settings.parallel,
             should_stop=self._should_stop)
 
-    def _cancel_if_running(self) -> None:
-        """Closing the window never traps the user and never drops the work.
+    def _cancel_if_running(self) -> bool:
+        """Closing never traps the user and never drops the work in silence.
 
-        During the break: the fetch is told to stop and whatever is already
-        built is written with the first variant. During the choice pass: the
-        same, with the choices made so far.
+        During the break: the fetch is told to stop, and whatever was already
+        fetched is written. During the choice pass: writing the rest with the
+        first variants is exactly what this feature exists to avoid, so it is
+        asked for. False means the user changed their mind: stay open.
         """
+        if self.choice is not None:
+            left = len(self.choice.drafts) - self.choice.index
+            if not askUser(
+                    "Выбор не закончен: осталось слов — %d.\n\n"
+                    "Записать их с первыми вариантами части речи и значения?\n"
+                    "«Нет» — вернуться к выбору." % left,
+                    title="Anki Sentence Cards", defaultno=True):
+                return False
+            self.choice.accept_all()
+            self._end_choosing()
+            return True
         if self._busy and not self._cancelled:
             self._cancelled = True
             showWarning(BREAK_CANCELLED)
-        if self.choice is not None:
-            self.choice.accept_all()
-            self._end_choosing()
+        return True
 
     def reject(self):
-        self._cancel_if_running()
-        super().reject()
+        if self._cancel_if_running():
+            super().reject()
 
     def closeEvent(self, e):
-        self._cancel_if_running()
+        if not self._cancel_if_running():
+            e.ignore()
+            return
         super().closeEvent(e)
 
     def _should_stop(self) -> bool:
@@ -345,6 +357,10 @@ class MainDialog(QDialog):
         self.report_label.setText("".join(parts))
         self.retry_btn.setVisible(bool(batch.retry_words(out)))
         self.stack.setCurrentIndex(PAGE_REPORT)
+        if not self.isVisible():
+            # the window was closed mid-batch: the page switch would be invisible
+            showText(batch.report_plain(out, self.total.warnings, self.skipped_all),
+                     title="Anki Sentence Cards: отчёт")
 
     def _retry(self):
         words = batch.retry_words(self.total.outcomes)

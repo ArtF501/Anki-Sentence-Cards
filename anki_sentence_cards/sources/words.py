@@ -38,6 +38,22 @@ def _fill_ipa(roles: List[Role], donor: WordData) -> None:
             role.ipa = by_pos[role.pos]
 
 
+def _fill_from_lemma(roles: List[Role]) -> None:
+    """A role with no transcription takes the base form's — same part of speech only.
+
+    `supervised` keeps the transcription of `supervise` (the spec accepts the
+    missing final -d as the lesser evil), while `tired` never takes /taɪə/ from
+    `tire`: that is a noun and `tired` is an adjective, so they never match.
+    """
+    donors = {}
+    for role in roles:
+        if role.lemma and role.ipa and role.pos not in donors:
+            donors[role.pos] = role.ipa
+    for role in roles:
+        if not role.lemma and not role.ipa and role.pos in donors:
+            role.ipa = donors[role.pos]
+
+
 def collect_roles(word: str,
                   lookups: Sequence[Lookup],
                   ipa_lookup: Optional[Callable[[str], str]] = None,
@@ -89,6 +105,7 @@ def collect_roles(word: str,
             break
 
     out = order_roles(merge_roles(roles + lemma_roles))
+    _fill_from_lemma(out)
     if not out:
         raise SourceError(reason or "ни один словарь не ответил")
 

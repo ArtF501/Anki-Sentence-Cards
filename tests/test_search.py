@@ -186,3 +186,19 @@ def test_base_form_candidates_are_capped():
 
 def test_base_form_candidates_of_a_phrase_use_the_first_word():
     assert "supervise" in base_form_candidates("supervised closely")
+
+
+def test_base_form_candidates_never_returns_an_inflection_of_the_word():
+    """ran — форма от run, а не его базовая форма: обратное направление мусор."""
+    assert "ran" not in base_form_candidates("run")
+    assert "got" not in base_form_candidates("get")
+    assert "saw" not in base_form_candidates("see")
+    assert "lay" not in base_form_candidates("lie")
+    assert "drank" not in base_form_candidates("drunk")   # и не брат по спряжению
+
+
+def test_base_form_candidates_keep_the_right_direction():
+    assert "run" in base_form_candidates("ran")
+    assert "drink" in base_form_candidates("drunk")
+    assert "lay" in base_form_candidates("laid")
+    assert base_form_candidates("supervised") == ["supervise", "supervis"]

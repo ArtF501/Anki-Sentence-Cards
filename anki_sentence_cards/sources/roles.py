@@ -26,7 +26,25 @@ class WordData:
     shared_ipa: str = ""    # transcription the source tied to no role at all
 
 
+# `Type of word` on the card is one lower-case word. Wiktionary answers with
+# labels like "Proper noun" or "Prepositional phrase", so the head word is taken.
+KNOWN_POS = (
+    "noun", "verb", "adjective", "adverb", "pronoun", "preposition",
+    "conjunction", "interjection", "numeral", "article", "determiner",
+    "particle", "phrase",
+)
 _FILL = ("ipa", "definition", "source")
+
+
+def normalize_pos(raw: str) -> str:
+    """Lower-case single word; a multi-word label keeps its known part."""
+    text = " ".join((raw or "").split()).lower()
+    if " " not in text:
+        return text
+    for token in text.split():
+        if token in KNOWN_POS:
+            return token
+    return text
 
 
 def merge_roles(roles: List[Role]) -> List[Role]:

@@ -101,3 +101,17 @@ def test_lookup_ipa_propagates_a_network_failure(net):
     net["payload"] = SourceError("сервис ответил ошибкой 503")
     with pytest.raises(SourceError):
         wiktionary.lookup_ipa("supervise")
+
+
+@pytest.mark.parametrize("raw,want", [
+    ("Noun", "noun"), ("Proper noun", "noun"), ("Verb form", "verb"),
+    ("Prepositional phrase", "phrase"), ("Adjective", "adjective"),
+])
+def test_part_of_speech_is_one_known_word(raw, want):
+    payload = {"en": [{"partOfSpeech": raw, "definitions": [{"definition": "d"}]}]}
+    assert wiktionary.parse_definitions(payload).roles[0].pos == want
+
+
+def test_unknown_part_of_speech_is_kept_as_is():
+    payload = {"en": [{"partOfSpeech": "Contraction", "definitions": [{"definition": "d"}]}]}
+    assert wiktionary.parse_definitions(payload).roles[0].pos == "contraction"

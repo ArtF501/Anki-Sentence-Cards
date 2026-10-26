@@ -5,7 +5,7 @@ from urllib.parse import quote
 
 from . import http
 from .http import SourceError
-from .roles import Role, WordData, merge_roles
+from .roles import Role, WordData, merge_roles, normalize_pos
 
 URL = "https://api.dictionaryapi.dev/api/v2/entries/en/"
 SOURCE = "dictionaryapi"
@@ -36,7 +36,7 @@ def _entry_roles(entry: dict) -> list:
     for meaning in meanings:
         if not isinstance(meaning, dict):
             raise SourceError("словарь вернул непонятный ответ")
-        pos = _text(meaning.get("partOfSpeech")).lower()
+        pos = normalize_pos(_text(meaning.get("partOfSpeech")))
         defs = meaning.get("definitions", [])
         if not isinstance(defs, list) or (defs and not isinstance(defs[0], dict)):
             raise SourceError("словарь вернул непонятный ответ")
