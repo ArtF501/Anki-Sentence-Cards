@@ -5,6 +5,7 @@ from typing import Dict, List, Tuple
 # Combo item meaning 'leave this note field empty'.
 NOT_FILLED = ""
 TTS_LANGS = ("en-GB", "en-US")
+MAX_PARALLEL = 8
 
 
 @dataclass
@@ -18,6 +19,7 @@ class Settings:
     tts_lang: str = "en-GB"
     occurrence_limit: int = 50
     wiktionary_ipa: bool = True
+    parallel: int = 6
 
 
 def _str(v, default: str) -> str:
@@ -41,6 +43,13 @@ def load_settings(raw) -> Settings:
         limit = d.occurrence_limit
     if isinstance(raw.get("occurrence_limit"), bool) or limit < 1:
         limit = d.occurrence_limit
+    try:
+        workers = int(raw.get("parallel", d.parallel))
+    except (TypeError, ValueError, OverflowError):
+        workers = d.parallel
+    if isinstance(raw.get("parallel"), bool):
+        workers = d.parallel
+    workers = max(1, min(workers, MAX_PARALLEL))
     return Settings(
         books=books,
         active_book=_str(raw.get("active_book"), d.active_book),
@@ -51,6 +60,7 @@ def load_settings(raw) -> Settings:
         tts_lang=lang if lang in TTS_LANGS else d.tts_lang,
         occurrence_limit=limit,
         wiktionary_ipa=wiki_ipa if isinstance(wiki_ipa, bool) else d.wiktionary_ipa,
+        parallel=workers,
     )
 
 
@@ -72,6 +82,7 @@ def to_dict(s: Settings) -> dict:
         "tts_lang": s.tts_lang,
         "occurrence_limit": s.occurrence_limit,
         "wiktionary_ipa": s.wiktionary_ipa,
+        "parallel": s.parallel,
     }
 
 

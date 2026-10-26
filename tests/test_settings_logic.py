@@ -155,3 +155,12 @@ def test_wiktionary_ipa_defaults_to_true_on_junk():
 def test_wiktionary_ipa_can_be_switched_off():
     assert load_settings({"wiktionary_ipa": False}).wiktionary_ipa is False
     assert to_dict(load_settings({"wiktionary_ipa": False}))["wiktionary_ipa"] is False
+
+
+def test_parallel_setting_is_clamped():
+    assert load_settings({"parallel": 0}).parallel == 1
+    assert load_settings({"parallel": 99}).parallel == 8
+    assert load_settings({"parallel": "abc"}).parallel == 6
+    assert load_settings({}).parallel == 6
+    assert load_settings({"parallel": True}).parallel == 6
+    assert to_dict(load_settings({"parallel": 4}))["parallel"] == 4

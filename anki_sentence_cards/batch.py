@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import html
 import re
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Tuple
 
@@ -22,6 +24,9 @@ INCOMPLETE = "incomplete"
 DUPLICATE = "duplicate"
 FAILED = "failed"
 NOT_PROCESSED = "not_processed"
+
+MAX_WORKERS = 8
+STOPPED = "перерыв прерван"
 
 
 _LEAD = re.compile(r"^\(?\d+[.)]\s+|^[-*\u2022]\s+")
@@ -281,16 +286,45 @@ def split_duplicates(picks: List[Pick], find_dup: Callable[[str], Optional[int]]
     return rest
 
 
-def build_drafts(picks: List[Pick], build: Callable, progress: Callable[[int, int, str], None] = None):
-    """Background thread: (pick, draft or None, error or '') for each pick."""
-    out = []
-    for i, p in enumerate(picks):
+def build_drafts(picks: List[Pick], build: Callable,
+                 progress: Callable[[int, int, str], None] = None,
+                 workers: int = 6,
+                 should_stop: Optional[Callable[[], bool]] = None):
+    """Background thread: (pick, draft or None, error or '') for each pick.
+
+    The words are fetched in parallel — twenty of them one by one would be a
+    quarter of an hour of waiting — but the result keeps the order of `picks`,
+    because the user picked the sentences in that order and will choose roles
+    in it too. `should_stop` is read before each word: whoever asked to stop
+    gets back everything already built and an honest reason for the rest.
+    """
+    total = len(picks)
+    if not total:
+        return []
+    out: List[Optional[Tuple]] = [None] * total
+    lock = threading.Lock()
+    counter = {"done": 0}
+
+    def one(i: int, p: Pick) -> None:
+        if should_stop is not None and should_stop():
+            out[i] = (p, None, STOPPED)
+        else:
+            try:
+                out[i] = (p, build(p.word, p.occ), "")
+            except Exception as e:  # build_draft should not raise; safety net
+                out[i] = (p, None, "не удалось собрать карточку: %s" % e)
         if progress:
-            progress(i, len(picks), p.word)
-        try:
-            out.append((p, build(p.word, p.occ), ""))
-        except Exception as e:  # build_draft should not raise; safety net
-            out.append((p, None, "не удалось собрать карточку: %s" % e))
+            with lock:
+                done_before = counter["done"]
+                counter["done"] += 1
+            progress(done_before, total, p.word)
+
+    with ThreadPoolExecutor(max_workers=max(1, min(int(workers or 1), total))) as pool:
+        for i, p in enumerate(picks):
+            pool.submit(one, i, p)
+    for i, slot in enumerate(out):
+        if slot is None:  # a worker died before it could write its slot
+            out[i] = (picks[i], None, "не удалось собрать карточку")
     return out
 
 
@@ -323,23 +357,35 @@ def add_all(built, add: Callable, result: BatchResult) -> None:
 
 def run_batch(picks: List[Pick], find_dup: Callable, build: Callable, add: Callable,
               result: BatchResult, run_bg: Callable, done: Callable[[BatchResult], None],
-              progress: Callable = None) -> None:
+              progress: Callable = None,
+              choose: Optional[Callable[[List[Tuple], Callable[[], None]], None]] = None,
+              workers: int = 6,
+              should_stop: Optional[Callable[[], bool]] = None) -> None:
     """The whole sequence; the dialog and the tests both call exactly this.
 
     split_duplicates (main) -> build_drafts via run_bg (background) ->
-    add_all (main) -> done(result). `run_bg(work, ok, fail)` runs work() off
-    the main thread and calls ok(value) or fail(exc) back on it; tests pass
-    a synchronous one. If the background step fails, the picks that were to
-    be built become NOT_PROCESSED (retryable).
+    choose (main, optional) -> add_all (main) -> done(result).
+    `run_bg(work, ok, fail)` runs work() off the main thread and calls
+    ok(value) or fail(exc) back on it; tests pass a synchronous one. `choose`
+    gets the built drafts and the closure that finishes the batch: nothing is
+    written and no report is shown until it calls that closure. If the
+    background step fails, the picks that were to be built become
+    NOT_PROCESSED (retryable).
     """
     rest = split_duplicates(picks, find_dup, result)
     if not rest:
         done(result)
         return
 
-    def ok(built):
+    def finish(built):
         add_all(built, add, result)
         done(result)
+
+    def ok(built):
+        if choose is None:
+            finish(built)
+            return
+        choose(built, lambda: finish(built))
 
     def fail(e):
         result.warnings.append("Сборка карточек прервана: %s" % e)
@@ -347,7 +393,7 @@ def run_batch(picks: List[Pick], find_dup: Callable, build: Callable, add: Calla
             result.outcomes.append(Outcome(p.word, NOT_PROCESSED, ["сборка прервана: %s" % e]))
         done(result)
 
-    run_bg(lambda: build_drafts(rest, build, progress), ok, fail)
+    run_bg(lambda: build_drafts(rest, build, progress, workers, should_stop), ok, fail)
 
 
 def merge_results(prev: BatchResult, new: BatchResult, retried: List[str]) -> BatchResult:

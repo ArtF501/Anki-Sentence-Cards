@@ -1,3 +1,5 @@
+import threading
+import time
 from types import SimpleNamespace
 
 from anki_sentence_cards import batch as b
@@ -365,3 +367,149 @@ def test_choice_empty_state_is_done_at_once():
     st.choose_meaning(0)
     st.accept_all()
     assert st.done
+
+
+# ------------------------------------------------------- parallel build phase
+
+def bpick(word):
+    return b.Pick(word, occ())
+
+
+def ok_build(word, o):
+    return draft(word)
+
+
+def test_parallel_results_keep_the_order_of_the_picks():
+    def slow_a(word, o):
+        if word == "a":
+            time.sleep(0.05)
+        return draft(word)
+
+    out = b.build_drafts([bpick("a"), bpick("b"), bpick("c")], slow_a, workers=3)
+    assert [p.word for p, _, _ in out] == ["a", "b", "c"]
+    assert all(d is not None for _, d, _ in out)
+
+
+def test_parallel_words_are_built_at_the_same_time():
+    lock = threading.Lock()
+    state = {"now": 0, "max": 0}
+
+    def build(word, o):
+        with lock:
+            state["now"] += 1
+            state["max"] = max(state["max"], state["now"])
+        time.sleep(0.05)
+        with lock:
+            state["now"] -= 1
+        return draft(word)
+
+    b.build_drafts([bpick(str(i)) for i in range(6)], build, workers=3)
+    assert state["max"] > 1
+
+
+def test_parallel_one_word_blowing_up_does_not_touch_the_others():
+    def build(word, o):
+        if word == "boom":
+            raise RuntimeError("boom")
+        return draft(word)
+
+    out = b.build_drafts([bpick("a"), bpick("boom"), bpick("c")], build, workers=3)
+    assert [bool(d) for _, d, _ in out] == [True, False, True]
+    assert [p.word for p, d, _ in out if d is None] == ["boom"]
+    assert "boom" in out[1][2]
+
+
+# Review Focus 2
+def test_parallel_should_stop_leaves_the_rest_unbuilt_and_keeps_what_was_done():
+    seen = {"n": 0}
+
+    def stop():
+        seen["n"] += 1
+        return seen["n"] > 2
+
+    out = b.build_drafts([bpick(str(i)) for i in range(10)], ok_build, workers=1,
+                         should_stop=stop)
+    assert len(out) == 10
+    assert sum(1 for _, d, _ in out if d is not None) == 2
+    assert all(e for _, d, e in out if d is None)          # у каждого — честная причина
+
+
+def test_parallel_progress_is_reported_once_per_word():
+    calls = []
+    lock = threading.Lock()
+
+    def progress(i, n, w):
+        with lock:
+            calls.append((i, n))
+
+    b.build_drafts([bpick(str(i)) for i in range(5)], ok_build, progress=progress, workers=3)
+    assert len(calls) == 5 and {n for _, n in calls} == {5}
+    assert sorted(i for i, _ in calls) == [0, 1, 2, 3, 4]
+
+
+def test_parallel_empty_picks_need_no_pool():
+    assert b.build_drafts([], ok_build, workers=4) == []
+
+
+def test_parallel_workers_are_clamped_to_at_least_one():
+    out = b.build_drafts([bpick("a")], ok_build, workers=0)
+    assert [p.word for p, _, _ in out] == ["a"]
+
+
+# ------------------------------------------------------- choose phase in a batch
+
+def test_run_batch_calls_choose_between_building_and_adding():
+    order = []
+    picks = [b.Pick("a", occ())]
+    res = b.BatchResult()
+    seen = []
+
+    def choose(built, finish):
+        order.append("choose")
+        finish()
+
+    b.run_batch(picks, lambda w: None, ok_build, lambda d: order.append("add"),
+                res, sync_bg, seen.append, choose=choose)
+    assert order == ["choose", "add"]
+    assert seen == [res] and status(res) == {"a": b.CREATED}
+
+
+def test_run_batch_without_choose_adds_everything_as_before():
+    order = []
+    res = b.BatchResult()
+    seen = []
+    b.run_batch([b.Pick("a", occ())], lambda w: None, ok_build,
+                lambda d: order.append("add"), res, sync_bg, seen.append)
+    assert order == ["add"] and seen == [res]
+
+
+def test_run_batch_does_not_finish_until_choose_calls_finish():
+    res = b.BatchResult()
+    seen = []
+    held = {}
+    b.run_batch([b.Pick("a", occ())], lambda w: None, ok_build, lambda d: None,
+                res, sync_bg, seen.append, choose=lambda built, finish: held.update(f=finish))
+    assert seen == []                     # отчёт ещё не показан: пользователь выбирает
+    held["f"]()
+    assert seen == [res]
+
+
+def test_run_batch_passes_workers_and_should_stop_to_the_build():
+    got = {}
+
+    def run_bg(work, ok, fail):
+        ok(work())
+
+    def spy(picks, build, progress=None, workers=6, should_stop=None):
+        got.update(workers=workers, should_stop=should_stop)
+        return []
+
+    import anki_sentence_cards.batch as mod
+    real, mod.build_drafts = mod.build_drafts, spy
+    try:
+        stop = lambda: False
+        mod.run_batch([b.Pick("a", occ())], lambda w: None, ok_build, lambda d: None,
+                      b.BatchResult(), run_bg, lambda r: None, workers=3, should_stop=stop)
+    finally:
+        mod.build_drafts = real
+    assert got == {"workers": 3, "should_stop": stop}
