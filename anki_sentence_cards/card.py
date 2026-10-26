@@ -89,10 +89,12 @@ def build_draft(word: str, occ: Occurrence, settings: Settings,
         definition = _guard(d, ["pos", "ipa"], "словарь", do_lookup) or ""
 
     def do_meaning():
-        m = meaning.get_meaning(word, settings.deepl_key, definition)
-        if not (m.text or "").strip():
+        options = meaning.get_meaning_options(word, settings.deepl_key)
+        if not options or not (options[0].translation or "").strip():
             raise SourceError("значение пустое")
-        d.values["meaning"] = m.text
+        option = options[0]
+        hint = option.hint or meaning.fallback_hint(definition)
+        d.values["meaning"] = meaning.compose(hint, definition, option.translation.strip())
 
     _guard(d, ["meaning"], "значение слова", do_meaning)
 

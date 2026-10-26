@@ -7,7 +7,7 @@ from anki_sentence_cards.settings import Settings
 from anki_sentence_cards.sources import dictionary, meaning, translate, tts
 from anki_sentence_cards.sources.roles import Role, WordData
 from anki_sentence_cards.sources.http import SourceError
-from anki_sentence_cards.sources.meaning import Meaning
+from anki_sentence_cards.sources.meaning import MeaningOption
 
 SENT = "He had to give up smoking."
 KEYS = {"front", "translate", "pos", "ipa", "meaning", "sound"}
@@ -22,7 +22,7 @@ def occ_for(form):
 def src(monkeypatch):
     s = {"tr": translate.Translation("Ему пришлось бросить курить.", "google"),
          "dict": WordData([Role("verb", "ɡɪv", "stop doing")]),
-         "mean": Meaning("(verb) stop - бросить", "reverso"),
+         "mean": [MeaningOption("", "бросить", "reverso")],
          "audio": b"MP3DATA", "lookups": []}
 
     def pick(key):
@@ -45,7 +45,7 @@ def src(monkeypatch):
 
     monkeypatch.setattr(translate, "translate", rec("tr", lambda text, key, target="RU": pick("tr")))
     monkeypatch.setattr(dictionary, "lookup", rec("dict", lookup))
-    monkeypatch.setattr(meaning, "get_meaning", rec("mean", lambda w, k, e: pick("mean")))
+    monkeypatch.setattr(meaning, "get_meaning_options", rec("mean", lambda w, k: pick("mean")))
     monkeypatch.setattr(tts, "synthesize", rec("audio", lambda w, lang="en-GB": pick("audio")))
     return s
 
@@ -100,12 +100,10 @@ def test_meaning_failure_is_isolated(src):
     assert d.values["translate"] and d.values["sound"]
 
 
-def test_dictionary_failure_still_gives_meaning_with_no_definition(src, monkeypatch):
-    seen = []
+def test_dictionary_failure_leaves_the_meaning_without_an_english_part(src):
     src["dict"] = SourceError("нет")
-    monkeypatch.setattr(meaning, "get_meaning", lambda w, k, e: seen.append(e) or Meaning("m", "x"))
     d = build_draft("smoking", occ_for("smoking"), Settings())
-    assert seen == [""] and d.values["meaning"] == "m"
+    assert d.values["meaning"] == "бросить"
 
 
 def test_empty_ipa_is_missing_but_pos_kept(src):
@@ -117,7 +115,7 @@ def test_empty_ipa_is_missing_but_pos_kept(src):
 
 def test_blank_results_are_not_passed_as_success(src):
     src["tr"] = translate.Translation("  ", "google")
-    src["mean"] = Meaning("", "x")
+    src["mean"] = [MeaningOption("", "  ", "reverso")]
     src["audio"] = b""
     d = build_draft("smoking", occ_for("smoking"), Settings())
     assert set(d.missing) == {"translate", "meaning", "sound"}
@@ -152,7 +150,7 @@ def test_sources_receive_right_arguments(src):
     build_draft("give up", occ_for("give up"), st)
     c = src["calls"]
     assert c["tr"][0] == (SENT, "KEY")
-    assert c["mean"][0] == ("give up", "KEY", "")
+    assert c["mean"][0] == ("give up", "KEY")
     assert c["audio"][0] == ("give up", "en-US")
     assert "dict" not in c
 
