@@ -24,8 +24,9 @@ from ..settings import load_settings
 log = logging.getLogger(__name__)
 
 PROFILE_CLOSED = "Профиль закрыт, партия не записана."
+BREAK_CANCELLED = "Перерыв прерван, уже добытые карточки будут дописаны."
 
-PAGE_INPUT, PAGE_PICK, PAGE_REPORT = 0, 1, 2
+PAGE_INPUT, PAGE_PICK, PAGE_REPORT, PAGE_CHOOSE = 0, 1, 2, 3
 
 
 def _addon(mw) -> str:
@@ -43,7 +44,10 @@ class MainDialog(QDialog):
         self.state = None
         self.pf = None
         self.occs = []
+        self.choice = None
+        self._finish_batch = None
         self._busy = False
+        self._cancelled = False
         self.total = batch.BatchResult()
         self.skipped_all = []
         self._retrying = []
@@ -54,6 +58,7 @@ class MainDialog(QDialog):
         self.stack.addWidget(self._make_input())
         self.stack.addWidget(self._make_pick())
         self.stack.addWidget(self._make_report())
+        self.stack.addWidget(self._make_choose())
 
     # ---- page 1: input
     def _make_input(self):
@@ -205,9 +210,13 @@ class MainDialog(QDialog):
         self._show_word()
 
     def keyPressEvent(self, e):
-        if (self.stack.currentIndex() == PAGE_PICK and not self.manual_edit.hasFocus()
-                and e.text() in tuple("123456789")):
+        digit = e.text() in tuple("123456789")
+        page = self.stack.currentIndex()
+        if page == PAGE_PICK and digit and not self.manual_edit.hasFocus():
             self._select(int(e.text()) - 1)
+            return
+        if page == PAGE_CHOOSE and digit:
+            self._pick_meaning(int(e.text()) - 1)
             return
         super().keyPressEvent(e)
 
@@ -262,22 +271,46 @@ class MainDialog(QDialog):
             self._retrying = []
             self._show_report()
 
+        self._cancelled = False
         batch.run_batch(
             picks, lambda w: find_duplicate(col, deck, w),
             lambda w, o: build_draft(w, o, settings, bool(fmap.get("sound"))),
             lambda d: add_note(self.mw.col, d, deck, notetype, fmap),
-            result, run_bg, done, progress)
+            result, run_bg, done, progress,
+            choose=self._begin_choosing,
+            workers=settings.parallel,
+            should_stop=self._should_stop)
+
+    def _cancel_if_running(self) -> None:
+        """Closing the window never traps the user and never drops the work.
+
+        During the break: the fetch is told to stop and whatever is already
+        built is written with the first variant. During the choice pass: the
+        same, with the choices made so far.
+        """
+        if self._busy and not self._cancelled:
+            self._cancelled = True
+            showWarning(BREAK_CANCELLED)
+        if self.choice is not None:
+            self.choice.accept_all()
+            self._end_choosing()
 
     def reject(self):
-        if self._busy:
-            return  # a batch is being built: closing would lose its report
+        self._cancel_if_running()
         super().reject()
 
     def closeEvent(self, e):
-        if self._busy:
-            e.ignore()
-            return
+        self._cancel_if_running()
         super().closeEvent(e)
+
+    def _should_stop(self) -> bool:
+        """Read from the fetching threads: the window or Anki asked to stop."""
+        if self._cancelled:
+            return True
+        try:
+            return bool(self.mw.progress.want_cancel())
+        except Exception:  # no progress window at all
+            return False
 
     # ---- page 3: report
     def _make_report(self):
@@ -318,6 +351,114 @@ class MainDialog(QDialog):
         if words:
             self._retrying = words
             self._open_state(words)
+
+
+    # ---- page 4: choose the role and the meaning
+    def _make_choose(self):
+        w = QWidget()
+        lay = QVBoxLayout(w)
+        self.ch_title = QLabel()
+        self.ch_title.setStyleSheet("font-size: 16pt; font-weight: bold;")
+        lay.addWidget(self.ch_title)
+        self.ch_sentence = QLabel()
+        self.ch_sentence.setWordWrap(True)
+        self.ch_sentence.setTextFormat(Qt.TextFormat.RichText)
+        lay.addWidget(self.ch_sentence)
+        self.ch_roles_host = QWidget()
+        self.ch_roles = QHBoxLayout(self.ch_roles_host)
+        self.ch_roles.setContentsMargins(0, 0, 0, 0)
+        lay.addWidget(self.ch_roles_host)
+        self.ch_info = QLabel()
+        self.ch_info.setWordWrap(True)
+        lay.addWidget(self.ch_info)
+        self.ch_list = QListWidget()
+        self.ch_list.setWordWrap(True)
+        self.ch_list.itemClicked.connect(self._clicked_meaning)
+        lay.addWidget(self.ch_list, 1)
+        row = QHBoxLayout()
+        accept = QPushButton("Принять всё")
+        accept.clicked.connect(self._accept_all)
+        row.addStretch(1)
+        row.addWidget(accept)
+        lay.addLayout(row)
+        return w
+
+    def _begin_choosing(self, built, finish):
+        """Second pass. ChoiceState edits the very drafts `built` holds, so
+        finish() writes the notes with the user's choices already in them."""
+        state = batch.ChoiceState([d for _, d, _ in built if d is not None])
+        if self._cancelled or state.done:
+            state.accept_all()
+            finish()
+            return
+        self.choice = state
+        self._finish_batch = finish
+        self.stack.setCurrentIndex(PAGE_CHOOSE)
+        self._show_choice()
+
+    def _show_choice(self):
+        st = self.choice
+        if st is None:
+            return
+        if st.done:
+            self._end_choosing()
+            return
+        d = st.current
+        self.ch_title.setText("%s    %s" % (d.word, st.counter))
+        self.ch_sentence.setText(d.values.get("front", ""))
+        self._fill_roles(st)
+        labels = st.meaning_labels()
+        self.ch_list.clear()
+        for i, text in enumerate(labels):
+            self.ch_list.addItem(QListWidgetItem(
+                "%s %s" % ("%d." % (i + 1) if i < 9 else "  ", text)))
+        if labels:
+            self.ch_info.setText("Значение: клик или цифра выбирает и ведёт к следующему слову.")
+        else:
+            self.ch_list.addItem(QListWidgetItem("значение не добыто — подтвердить и идти дальше"))
+            self.ch_info.setText("Значение добыть не удалось: поле останется пустым.")
+
+    def _fill_roles(self, st):
+        while self.ch_roles.count():
+            widget = self.ch_roles.takeAt(0).widget()
+            if widget is not None:
+                widget.deleteLater()
+        labels = st.role_labels() if st.needs_role() else []
+        self.ch_roles_host.setVisible(bool(labels))
+        if not labels:
+            return
+        chosen = st.current.role_index
+        for i, text in enumerate(labels):
+            button = QPushButton(text)
+            button.setCheckable(True)
+            button.setChecked(i == chosen)
+            button.clicked.connect(lambda _=False, k=i: self._pick_role(k))
+            self.ch_roles.addWidget(button)
+        self.ch_roles.addStretch(1)
+
+    def _pick_role(self, i):
+        if self.choice is not None:
+            self.choice.choose_role(i)   # the word stays, the meanings redraw
+            self._show_choice()
+
+    def _clicked_meaning(self, item):
+        self._pick_meaning(self.ch_list.row(item))
+
+    def _pick_meaning(self, row):
+        if self.choice is not None and row >= 0:
+            self.choice.choose_meaning(row)
+            self._show_choice()
+
+    def _accept_all(self):
+        if self.choice is not None:
+            self.choice.accept_all()
+            self._end_choosing()
+
+    def _end_choosing(self):
+        self.choice = None
+        finish, self._finish_batch = self._finish_batch, None
+        if finish is not None:
+            finish()
 
 
 def register(mw):

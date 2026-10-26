@@ -1,14 +1,16 @@
 """Settings window: books, deck, note type, DeepL key, voice, field mapping."""
 from aqt.qt import (
-    QButtonGroup, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
-    QHBoxLayout, QLabel, QLineEdit, QPushButton, QRadioButton, QVBoxLayout, QWidget,
+    QButtonGroup, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog,
+    QFormLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QRadioButton,
+    QSpinBox, QVBoxLayout, QWidget,
 )
 
 from aqt.utils import showWarning
 
 from ..notes import resolve_field_map, settle_field_map
 from ..settings import (
-    add_book, load_settings, merge_for_save, normalize_active, remove_book,
+    MAX_PARALLEL, add_book, load_settings, merge_for_save, normalize_active,
+    remove_book,
 )
 from .field_map_dialog import open_field_map
 
@@ -69,6 +71,13 @@ class SettingsDialog(QDialog):
         self._lang.addItems(["en-GB", "en-US"])
         self._lang.setCurrentIndex(max(self._lang.findText(self.s.tts_lang), 0))
         form.addRow("Озвучка", self._lang)
+        self._parallel = QSpinBox()
+        self._parallel.setRange(1, MAX_PARALLEL)
+        self._parallel.setValue(self.s.parallel)
+        form.addRow("Слов за раз (перерыв)", self._parallel)
+        self._wiki_ipa = QCheckBox("Добывать транскрипцию из Wiktionary")
+        self._wiki_ipa.setChecked(self.s.wiktionary_ipa)
+        form.addRow("", self._wiki_ipa)
 
         map_btn = QPushButton("Сопоставить поля вручную")
         map_btn.clicked.connect(self._map_manually)
@@ -138,6 +147,8 @@ class SettingsDialog(QDialog):
         self.s.notetype = self._notetype.currentText()
         self.s.deepl_key = self._key.text().strip()
         self.s.tts_lang = self._lang.currentText()
+        self.s.parallel = self._parallel.value()
+        self.s.wiktionary_ipa = self._wiki_ipa.isChecked()
         self.mw.addonManager.writeConfig(_addon(self.mw), merge_for_save(self._raw, self.s))
         fields = _notetype_fields(self.mw, self.s.notetype)
         if fields is not None and "front" in resolve_field_map(fields, self.s.field_map)[1]:
