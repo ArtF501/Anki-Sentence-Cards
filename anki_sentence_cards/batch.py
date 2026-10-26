@@ -12,7 +12,10 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 from .book.normalize import normalize_query
 from .book.search import Occurrence, find_occurrences
+from .card import CardDraft, chosen_role, resolve_choices
 from .notes import DuplicateCheckFailed, NoteError, NoteTypeMissing, resolve_field_map
+from .sources.meaning import compose, fallback_hint
+from .sources.roles import Role
 
 CREATED = "created"
 INCOMPLETE = "incomplete"
@@ -107,6 +110,109 @@ class PickState:
             return False
         self.choose(manual_occurrence(self.words[self.index], sentence))
         return True
+
+
+def needs_choice(draft: CardDraft) -> bool:
+    """True when there is an actual choice to make: one variant is no choice."""
+    return len(draft.roles) > 1 or len(draft.meanings) > 1
+
+
+def role_label(role: Role, shared_ipa: str = "") -> str:
+    """Button text for one role: part of speech, transcription, base-form mark."""
+    parts = [role.pos or "?"]
+    ipa = (role.ipa or shared_ipa or "").strip()
+    if ipa:
+        parts.append(ipa)
+    if role.lemma:
+        parts.append("(от %s)" % role.lemma)
+    return "  ".join(parts)
+
+
+def meaning_labels(draft: CardDraft) -> List[str]:
+    """Candidate meanings exactly as they would land in the field.
+
+    The English part comes from the role chosen right now, so the list is
+    redrawn whenever the role changes.
+    """
+    role = chosen_role(draft)
+    definition = (role.definition or "").strip() if role else ""
+    out = []
+    for option in draft.meanings:
+        hint = option.hint or fallback_hint(definition)
+        out.append(compose(hint, definition, option.translation.strip()))
+    return out
+
+
+class ChoiceState:
+    """Walks the drafts that have something to choose, in the batch's order.
+
+    Mutates the very drafts it was given: the caller writes its notes from the
+    same objects afterwards, with the user's choices already in their fields.
+    """
+
+    def __init__(self, drafts: List[CardDraft]):
+        self.drafts = list(drafts)
+        self.index = 0
+        self._settle()
+
+    def _settle(self) -> None:
+        """Resolve and pass over every draft with nothing to ask."""
+        while self.index < len(self.drafts) and not needs_choice(self.drafts[self.index]):
+            resolve_choices(self.drafts[self.index])
+            self.index += 1
+
+    @property
+    def done(self) -> bool:
+        return self.index >= len(self.drafts)
+
+    @property
+    def current(self) -> Optional[CardDraft]:
+        return None if self.done else self.drafts[self.index]
+
+    @property
+    def counter(self) -> str:
+        return "%d из %d" % (min(self.index + 1, len(self.drafts)), len(self.drafts))
+
+    def needs_role(self) -> bool:
+        return not self.done and len(self.current.roles) > 1
+
+    def needs_meaning(self) -> bool:
+        return not self.done and len(self.current.meanings) > 1
+
+    def role_labels(self) -> List[str]:
+        d = self.current
+        return [] if d is None else [role_label(r, d.shared_ipa) for r in d.roles]
+
+    def meaning_labels(self) -> List[str]:
+        d = self.current
+        return [] if d is None else meaning_labels(d)
+
+    def choose_role(self, i: int) -> None:
+        """The cursor stays: the meanings are redrawn under the new role."""
+        d = self.current
+        if d is not None and 0 <= i < len(d.roles):
+            d.role_index = i
+
+    def choose_meaning(self, i: int) -> None:
+        """Take this meaning and move on. With no meanings at all, i=0 confirms."""
+        d = self.current
+        if d is None:
+            return
+        if d.meanings:
+            if not 0 <= i < len(d.meanings):
+                return
+            d.meaning_index = i
+        elif i != 0:
+            return
+        resolve_choices(d)
+        self.index += 1
+        self._settle()
+
+    def accept_all(self) -> None:
+        """Everything left keeps the variants it has now; nothing is asked again."""
+        while not self.done:
+            resolve_choices(self.drafts[self.index])
+            self.index += 1
 
 
 @dataclass

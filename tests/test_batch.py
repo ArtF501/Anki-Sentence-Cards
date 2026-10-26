@@ -3,6 +3,8 @@ from types import SimpleNamespace
 from anki_sentence_cards import batch as b
 from anki_sentence_cards.book.search import Occurrence, find_occurrences, mark_match
 from anki_sentence_cards.card import CardDraft
+from anki_sentence_cards.sources.meaning import MeaningOption
+from anki_sentence_cards.sources.roles import Role
 from anki_sentence_cards.notes import (DuplicateCheckFailed, NoteError, NoteTypeMissing,
                                        add_note, DEFAULT_FIELD_NAMES)
 
@@ -238,3 +240,128 @@ def test_parse_words_strips_numbering_and_edge_punctuation():
 def test_manual_occurrence_normalizes_curly_apostrophe():
     occ = b.manual_occurrence("don't", "I don’t know.")
     assert b.highlight_html(occ) == "I <b>don&#x27;t</b> know."
+
+
+# ---------------------------------------------------------------- choice pass
+
+def choice_draft(roles=("verb",), meanings=1, definitions=None, shared_ipa="", word="x"):
+    defs = list(definitions or [""] * len(roles))
+    d = CardDraft(word=word,
+                  values={k: "" for k in ("front", "translate", "pos", "ipa", "meaning", "sound")})
+    d.roles = [Role(pos, "", defs[i]) for i, pos in enumerate(roles)]
+    d.shared_ipa = shared_ipa
+    d.meanings = [MeaningOption("", "перевод%d" % i, "reverso") for i in range(meanings)]
+    return d
+
+
+# Review Focus 5
+def test_choice_a_word_with_one_role_and_one_meaning_is_not_asked():
+    assert b.needs_choice(choice_draft(roles=["verb"], meanings=1)) is False
+
+
+def test_choice_four_roles_and_one_meaning_asks_only_the_role():
+    st = b.ChoiceState([choice_draft(roles=["verb", "noun", "adjective", "adverb"], meanings=1)])
+    assert st.needs_role() and not st.needs_meaning()
+
+
+def test_choice_one_role_and_six_meanings_asks_only_the_meaning():
+    st = b.ChoiceState([choice_draft(roles=["verb"], meanings=6)])
+    assert not st.needs_role() and st.needs_meaning()
+
+
+# Review Focus 3
+def test_choice_a_phrase_is_never_asked_for_a_role():
+    st = b.ChoiceState([choice_draft(roles=["phrase"], meanings=3, word="get along")])
+    assert not st.needs_role() and st.needs_meaning()
+
+
+# Review Focus 4
+def test_choice_run_shows_three_buttons_and_one_shared_transcription():
+    d = choice_draft(roles=["verb", "noun", "adjective"], shared_ipa="rʌn")
+    assert b.ChoiceState([d]).role_labels() == ["verb  rʌn", "noun  rʌn", "adjective  rʌn"]
+
+
+def test_choice_role_label_marks_a_lemma_role():
+    assert b.role_label(Role("noun", "taɪə", lemma="tire")) == "noun  taɪə  (от tire)"
+
+
+def test_choice_role_label_without_any_transcription():
+    assert b.role_label(Role("verb")) == "verb"
+
+
+def test_choice_role_own_transcription_wins_over_the_shared_one():
+    assert b.role_label(Role("noun", "ˈrekɔːd"), "rɪˈkɔːd") == "noun  ˈrekɔːd"
+
+
+def test_choice_choosing_a_role_redraws_the_meanings_with_its_definition():
+    d = choice_draft(roles=["noun", "verb"], definitions=["a thing", "to write"], meanings=1)
+    st = b.ChoiceState([d])
+    before = st.meaning_labels()
+    st.choose_role(1)
+    assert st.current is d                      # курсор не двинулся
+    assert st.meaning_labels() != before and "to write" in st.meaning_labels()[0]
+
+
+def test_choice_meaning_labels_are_exactly_what_lands_on_the_card():
+    d = choice_draft(roles=["verb"], definitions=["to write"], meanings=2)
+    labels = b.meaning_labels(d)
+    b.ChoiceState([d]).choose_meaning(1)
+    assert d.values["meaning"] == labels[1]
+
+
+def test_choice_choosing_a_meaning_moves_to_the_next_word():
+    st = b.ChoiceState([choice_draft(meanings=2), choice_draft(meanings=2)])
+    st.choose_meaning(0)
+    assert st.counter == "2 из 2"
+
+
+def test_choice_words_needing_no_choice_are_skipped_but_resolved():
+    st = b.ChoiceState([choice_draft(roles=["verb"], meanings=1), choice_draft(meanings=2)])
+    assert st.counter == "2 из 2"               # первое слово проехало само
+    assert st.drafts[0].values["pos"] == "verb"
+
+
+def test_choice_accept_all_takes_the_first_variant_everywhere():
+    st = b.ChoiceState([choice_draft(roles=["noun", "verb"], meanings=3) for _ in range(5)])
+    st.accept_all()
+    assert st.done
+    assert all(d.values["pos"] == "noun" for d in st.drafts)
+    assert all(d.values["meaning"] for d in st.drafts)
+
+
+def test_choice_accept_all_keeps_a_role_already_clicked():
+    st = b.ChoiceState([choice_draft(roles=["noun", "verb"], meanings=3)])
+    st.choose_role(1)
+    st.accept_all()
+    assert st.drafts[0].values["pos"] == "verb"
+
+
+def test_choice_a_draft_with_no_variants_at_all_is_resolved_and_not_asked():
+    st = b.ChoiceState([choice_draft(roles=[], meanings=0)])
+    assert st.done and "pos" in st.drafts[0].missing
+
+
+def test_choice_roles_without_a_single_meaning_can_still_be_confirmed():
+    """Словарь дал роли, Reverso умер: окно обязано пускать дальше."""
+    st = b.ChoiceState([choice_draft(roles=["noun", "verb"], meanings=0)])
+    assert st.needs_role() and not st.needs_meaning()
+    st.choose_role(1)
+    st.choose_meaning(0)
+    assert st.done and st.drafts[0].values["pos"] == "verb"
+    assert "meaning" in st.drafts[0].missing
+
+
+def test_choice_out_of_range_clicks_change_nothing():
+    st = b.ChoiceState([choice_draft(roles=["noun", "verb"], meanings=2)])
+    st.choose_role(9)
+    st.choose_meaning(-1)
+    assert st.current is not None and st.drafts[0].role_index == 0
+
+
+def test_choice_empty_state_is_done_at_once():
+    st = b.ChoiceState([])
+    assert st.done and st.current is None and st.role_labels() == [] and st.meaning_labels() == []
+    st.choose_role(0)
+    st.choose_meaning(0)
+    st.accept_all()
+    assert st.done
