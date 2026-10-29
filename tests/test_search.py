@@ -1,6 +1,8 @@
 import pytest
 
-from anki_sentence_cards.book.search import find_occurrences, mark_match, word_forms
+from anki_sentence_cards.book.search import (
+    base_form_candidates, find_occurrences, mark_match, word_forms,
+)
 
 
 def test_exact_form_comes_first():
@@ -161,3 +163,42 @@ def test_real_base_forms_are_generated(word, base):
 
 def test_plural_of_listed_word_finds_singular_sentence():
     assert len(find_occurrences(["The king sat."], "kings", 5)[0]) == 1
+
+
+def test_base_form_candidates_nearest_first():
+    assert base_form_candidates("supervised") == ["supervise", "supervis"]
+    assert base_form_candidates("making") == ["make", "mak"]
+    assert base_form_candidates("cats") == ["cat"]
+
+
+def test_base_form_candidates_handles_irregular():
+    assert "run" in base_form_candidates("ran")
+
+
+def test_base_form_candidates_never_returns_the_word_itself():
+    assert "cat" not in base_form_candidates("cat")
+    assert base_form_candidates("cat") == []
+
+
+def test_base_form_candidates_are_capped():
+    assert len(base_form_candidates("supervised")) <= 3
+
+
+def test_base_form_candidates_of_a_phrase_use_the_first_word():
+    assert "supervise" in base_form_candidates("supervised closely")
+
+
+def test_base_form_candidates_never_returns_an_inflection_of_the_word():
+    """ran — форма от run, а не его базовая форма: обратное направление мусор."""
+    assert "ran" not in base_form_candidates("run")
+    assert "got" not in base_form_candidates("get")
+    assert "saw" not in base_form_candidates("see")
+    assert "lay" not in base_form_candidates("lie")
+    assert "drank" not in base_form_candidates("drunk")   # и не брат по спряжению
+
+
+def test_base_form_candidates_keep_the_right_direction():
+    assert "run" in base_form_candidates("ran")
+    assert "drink" in base_form_candidates("drunk")
+    assert "lay" in base_form_candidates("laid")
+    assert base_form_candidates("supervised") == ["supervise", "supervis"]

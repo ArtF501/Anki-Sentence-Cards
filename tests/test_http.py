@@ -1,5 +1,6 @@
 import io
 import socket
+import time
 import urllib.error
 
 import pytest
@@ -137,3 +138,52 @@ def test_http_error_is_closed(transport):
 def test_real_network_is_blocked_by_default():
     with pytest.raises(AssertionError, match="network in test"):
         http._urlopen(None, 1)
+
+
+def test_requests_to_one_host_are_limited(monkeypatch):
+    """Двадцать слов в шести потоках не должны стучать в Reverso шестью сокетами."""
+    import threading
+    lock = threading.Lock()
+    state = {"now": 0, "max": 0}
+
+    def fake_open(req, timeout):
+        with lock:
+            state["now"] += 1
+            state["max"] = max(state["max"], state["now"])
+        time.sleep(0.03)
+        with lock:
+            state["now"] -= 1
+        return FakeResp(b"{}")
+
+    monkeypatch.setattr(http, "_urlopen", fake_open)
+    threads = [threading.Thread(target=http.get_json, args=("https://one.invalid/%d" % i,))
+               for i in range(6)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert state["max"] <= http.PER_HOST
+
+
+def test_different_hosts_do_not_wait_for_each_other(monkeypatch):
+    import threading
+    lock = threading.Lock()
+    state = {"now": 0, "max": 0}
+
+    def fake_open(req, timeout):
+        with lock:
+            state["now"] += 1
+            state["max"] = max(state["max"], state["now"])
+        time.sleep(0.05)
+        with lock:
+            state["now"] -= 1
+        return FakeResp(b"{}")
+
+    monkeypatch.setattr(http, "_urlopen", fake_open)
+    threads = [threading.Thread(target=http.get_json, args=("https://host%d.invalid/x" % i,))
+               for i in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert state["max"] == 4

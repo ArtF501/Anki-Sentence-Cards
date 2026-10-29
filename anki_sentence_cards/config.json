@@ -6,5 +6,7 @@
   "field_map": {},
   "deepl_key": "",
   "tts_lang": "en-GB",
-  "occurrence_limit": 50
+  "occurrence_limit": 50,
+  "wiktionary_ipa": true,
+  "parallel": 6
 }

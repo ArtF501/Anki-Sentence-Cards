@@ -1,8 +1,12 @@
+import threading
+import time
 from types import SimpleNamespace
 
 from anki_sentence_cards import batch as b
 from anki_sentence_cards.book.search import Occurrence, find_occurrences, mark_match
 from anki_sentence_cards.card import CardDraft
+from anki_sentence_cards.sources.meaning import MeaningOption
+from anki_sentence_cards.sources.roles import Role
 from anki_sentence_cards.notes import (DuplicateCheckFailed, NoteError, NoteTypeMissing,
                                        add_note, DEFAULT_FIELD_NAMES)
 
@@ -238,3 +242,300 @@ def test_parse_words_strips_numbering_and_edge_punctuation():
 def test_manual_occurrence_normalizes_curly_apostrophe():
     occ = b.manual_occurrence("don't", "I don’t know.")
     assert b.highlight_html(occ) == "I <b>don&#x27;t</b> know."
+
+
+# ---------------------------------------------------------------- choice pass
+
+def choice_draft(roles=("verb",), meanings=1, definitions=None, shared_ipa="", word="x"):
+    defs = list(definitions or [""] * len(roles))
+    d = CardDraft(word=word,
+                  values={k: "" for k in ("front", "translate", "pos", "ipa", "meaning", "sound")})
+    d.roles = [Role(pos, "", defs[i]) for i, pos in enumerate(roles)]
+    d.shared_ipa = shared_ipa
+    d.meanings = [MeaningOption("", "перевод%d" % i, "reverso") for i in range(meanings)]
+    return d
+
+
+# Review Focus 5
+def test_choice_a_word_with_one_role_and_one_meaning_is_not_asked():
+    assert b.needs_choice(choice_draft(roles=["verb"], meanings=1)) is False
+
+
+def test_choice_four_roles_and_one_meaning_asks_only_the_role():
+    st = b.ChoiceState([choice_draft(roles=["verb", "noun", "adjective", "adverb"], meanings=1)])
+    assert st.needs_role() and not st.needs_meaning()
+
+
+def test_choice_one_role_and_six_meanings_asks_only_the_meaning():
+    st = b.ChoiceState([choice_draft(roles=["verb"], meanings=6)])
+    assert not st.needs_role() and st.needs_meaning()
+
+
+# Review Focus 3
+def test_choice_a_phrase_is_never_asked_for_a_role():
+    st = b.ChoiceState([choice_draft(roles=["phrase"], meanings=3, word="get along")])
+    assert not st.needs_role() and st.needs_meaning()
+
+
+# Review Focus 4
+def test_choice_run_shows_three_buttons_and_one_shared_transcription():
+    d = choice_draft(roles=["verb", "noun", "adjective"], shared_ipa="rʌn")
+    assert b.ChoiceState([d]).role_labels() == ["verb  rʌn", "noun  rʌn", "adjective  rʌn"]
+
+
+def test_choice_role_label_marks_a_lemma_role():
+    assert b.role_label(Role("noun", "taɪə", lemma="tire")) == "noun  taɪə  (от tire)"
+
+
+def test_choice_role_label_without_any_transcription():
+    assert b.role_label(Role("verb")) == "verb"
+
+
+def test_choice_role_own_transcription_wins_over_the_shared_one():
+    assert b.role_label(Role("noun", "ˈrekɔːd"), "rɪˈkɔːd") == "noun  ˈrekɔːd"
+
+
+def test_choice_choosing_a_role_redraws_the_meanings_with_its_definition():
+    d = choice_draft(roles=["noun", "verb"], definitions=["a thing", "to write"], meanings=1)
+    st = b.ChoiceState([d])
+    before = st.meaning_labels()
+    st.choose_role(1)
+    assert st.current is d                      # курсор не двинулся
+    assert st.meaning_labels() != before and "to write" in st.meaning_labels()[0]
+
+
+def test_choice_meaning_labels_are_exactly_what_lands_on_the_card():
+    d = choice_draft(roles=["verb"], definitions=["to write"], meanings=2)
+    labels = b.meaning_labels(d)
+    b.ChoiceState([d]).choose_meaning(1)
+    assert d.values["meaning"] == labels[1]
+
+
+def test_choice_choosing_a_meaning_moves_to_the_next_word():
+    st = b.ChoiceState([choice_draft(meanings=2), choice_draft(meanings=2)])
+    st.choose_meaning(0)
+    assert st.counter == "2 из 2"
+
+
+def test_choice_words_needing_no_choice_are_skipped_but_resolved():
+    st = b.ChoiceState([choice_draft(roles=["verb"], meanings=1), choice_draft(meanings=2)])
+    assert st.counter == "2 из 2"               # первое слово проехало само
+    assert st.drafts[0].values["pos"] == "verb"
+
+
+def test_choice_accept_all_takes_the_first_variant_everywhere():
+    st = b.ChoiceState([choice_draft(roles=["noun", "verb"], meanings=3) for _ in range(5)])
+    st.accept_all()
+    assert st.done
+    assert all(d.values["pos"] == "noun" for d in st.drafts)
+    assert all(d.values["meaning"] for d in st.drafts)
+
+
+def test_choice_accept_all_keeps_a_role_already_clicked():
+    st = b.ChoiceState([choice_draft(roles=["noun", "verb"], meanings=3)])
+    st.choose_role(1)
+    st.accept_all()
+    assert st.drafts[0].values["pos"] == "verb"
+
+
+def test_choice_a_draft_with_no_variants_at_all_is_resolved_and_not_asked():
+    st = b.ChoiceState([choice_draft(roles=[], meanings=0)])
+    assert st.done and "pos" in st.drafts[0].missing
+
+
+def test_choice_roles_without_a_single_meaning_can_still_be_confirmed():
+    """Словарь дал роли, Reverso умер: окно обязано пускать дальше."""
+    st = b.ChoiceState([choice_draft(roles=["noun", "verb"], meanings=0)])
+    assert st.needs_role() and not st.needs_meaning()
+    st.choose_role(1)
+    st.choose_meaning(0)
+    assert st.done and st.drafts[0].values["pos"] == "verb"
+    assert "meaning" in st.drafts[0].missing
+
+
+def test_choice_out_of_range_clicks_change_nothing():
+    st = b.ChoiceState([choice_draft(roles=["noun", "verb"], meanings=2)])
+    st.choose_role(9)
+    st.choose_meaning(-1)
+    assert st.current is not None and st.drafts[0].role_index == 0
+
+
+def test_choice_empty_state_is_done_at_once():
+    st = b.ChoiceState([])
+    assert st.done and st.current is None and st.role_labels() == [] and st.meaning_labels() == []
+    st.choose_role(0)
+    st.choose_meaning(0)
+    st.accept_all()
+    assert st.done
+
+
+# ------------------------------------------------------- parallel build phase
+
+def bpick(word):
+    return b.Pick(word, occ())
+
+
+def ok_build(word, o):
+    return draft(word)
+
+
+def test_parallel_results_keep_the_order_of_the_picks():
+    def slow_a(word, o):
+        if word == "a":
+            time.sleep(0.05)
+        return draft(word)
+
+    out = b.build_drafts([bpick("a"), bpick("b"), bpick("c")], slow_a, workers=3)
+    assert [p.word for p, _, _ in out] == ["a", "b", "c"]
+    assert all(d is not None for _, d, _ in out)
+
+
+def test_parallel_words_are_built_at_the_same_time():
+    lock = threading.Lock()
+    state = {"now": 0, "max": 0}
+
+    def build(word, o):
+        with lock:
+            state["now"] += 1
+            state["max"] = max(state["max"], state["now"])
+        time.sleep(0.05)
+        with lock:
+            state["now"] -= 1
+        return draft(word)
+
+    b.build_drafts([bpick(str(i)) for i in range(6)], build, workers=3)
+    assert state["max"] > 1
+
+
+def test_parallel_one_word_blowing_up_does_not_touch_the_others():
+    def build(word, o):
+        if word == "boom":
+            raise RuntimeError("boom")
+        return draft(word)
+
+    out = b.build_drafts([bpick("a"), bpick("boom"), bpick("c")], build, workers=3)
+    assert [bool(d) for _, d, _ in out] == [True, False, True]
+    assert [p.word for p, d, _ in out if d is None] == ["boom"]
+    assert "boom" in out[1][2]
+
+
+# Review Focus 2
+def test_parallel_should_stop_leaves_the_rest_unbuilt_and_keeps_what_was_done():
+    seen = {"n": 0}
+
+    def stop():
+        seen["n"] += 1
+        return seen["n"] > 2
+
+    out = b.build_drafts([bpick(str(i)) for i in range(10)], ok_build, workers=1,
+                         should_stop=stop)
+    assert len(out) == 10
+    assert sum(1 for _, d, _ in out if d is not None) == 2
+    assert all(e for _, d, e in out if d is None)          # у каждого — честная причина
+
+
+def test_parallel_progress_is_reported_once_per_word():
+    calls = []
+    lock = threading.Lock()
+
+    def progress(i, n, w):
+        with lock:
+            calls.append((i, n))
+
+    b.build_drafts([bpick(str(i)) for i in range(5)], ok_build, progress=progress, workers=3)
+    assert len(calls) == 5 and {n for _, n in calls} == {5}
+    assert sorted(i for i, _ in calls) == [0, 1, 2, 3, 4]
+
+
+def test_parallel_empty_picks_need_no_pool():
+    assert b.build_drafts([], ok_build, workers=4) == []
+
+
+def test_parallel_workers_are_clamped_to_at_least_one():
+    out = b.build_drafts([bpick("a")], ok_build, workers=0)
+    assert [p.word for p, _, _ in out] == ["a"]
+
+
+# ------------------------------------------------------- choose phase in a batch
+
+def test_run_batch_calls_choose_between_building_and_adding():
+    order = []
+    picks = [b.Pick("a", occ())]
+    res = b.BatchResult()
+    seen = []
+
+    def choose(built, finish):
+        order.append("choose")
+        finish()
+
+    b.run_batch(picks, lambda w: None, ok_build, lambda d: order.append("add"),
+                res, sync_bg, seen.append, choose=choose)
+    assert order == ["choose", "add"]
+    assert seen == [res] and status(res) == {"a": b.CREATED}
+
+
+def test_run_batch_without_choose_adds_everything_as_before():
+    order = []
+    res = b.BatchResult()
+    seen = []
+    b.run_batch([b.Pick("a", occ())], lambda w: None, ok_build,
+                lambda d: order.append("add"), res, sync_bg, seen.append)
+    assert order == ["add"] and seen == [res]
+
+
+def test_run_batch_does_not_finish_until_choose_calls_finish():
+    res = b.BatchResult()
+    seen = []
+    held = {}
+    b.run_batch([b.Pick("a", occ())], lambda w: None, ok_build, lambda d: None,
+                res, sync_bg, seen.append, choose=lambda built, finish: held.update(f=finish))
+    assert seen == []                     # отчёт ещё не показан: пользователь выбирает
+    held["f"]()
+    assert seen == [res]
+
+
+def test_run_batch_passes_workers_and_should_stop_to_the_build():
+    got = {}
+
+    def run_bg(work, ok, fail):
+        ok(work())
+
+    def spy(picks, build, progress=None, workers=6, should_stop=None):
+        got.update(workers=workers, should_stop=should_stop)
+        return []
+
+    import anki_sentence_cards.batch as mod
+    real, mod.build_drafts = mod.build_drafts, spy
+    try:
+        stop = lambda: False
+        mod.run_batch([b.Pick("a", occ())], lambda w: None, ok_build, lambda d: None,
+                      b.BatchResult(), run_bg, lambda r: None, workers=3, should_stop=stop)
+    finally:
+        mod.build_drafts = real
+    assert got == {"workers": 3, "should_stop": stop}
+
+
+def test_choice_a_single_role_from_a_base_form_is_always_shown():
+    """Одна роль, и та от другого слова: пользователь обязан это увидеть."""
+    d = choice_draft(roles=["noun"], meanings=1, word="tired")
+    d.roles[0].lemma = "tire"
+    assert b.needs_choice(d) is True
+    st = b.ChoiceState([d])
+    assert st.needs_role() and st.role_labels() == ["noun  (от tire)"]
+
+
+def test_choice_a_single_role_of_the_word_itself_is_not_shown():
+    assert b.needs_choice(choice_draft(roles=["noun"], meanings=1)) is False
+
+
+def test_report_plain_carries_warnings_skipped_and_every_group():
+    out = [b.Outcome("a", b.CREATED), b.Outcome("c", b.FAILED, ["перерыв прерван"])]
+    text = b.report_plain(out, ["Партия остановлена: нет типа"], ["b"])
+    assert "Партия остановлена: нет типа" in text
+    assert "Пропущено вами: b" in text
+    assert "Создано (1)" in text and "a" in text
+    assert "Не создано (1)" in text and "c — перерыв прерван" in text
+
+
+def test_report_plain_says_so_when_nothing_was_created():
+    assert b.report_plain([], [], []) == "Ничего не создано."

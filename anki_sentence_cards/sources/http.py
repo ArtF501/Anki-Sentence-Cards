@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import socket
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -17,6 +18,20 @@ MAX_TIMEOUT = 10.0
 RETRIES = 2  # extra attempts after the first: 3 in total
 PAUSE = 0.5
 USER_AGENT = "Mozilla/5.0 anki-sentence-cards"
+PER_HOST = 2  # the break fetches words in parallel; one host must not be flooded
+
+_host_lock = threading.Lock()
+_host_gates = {}
+
+
+def _gate(url: str):
+    """Semaphore of this URL's host, shared by every thread of the add-on."""
+    host = urllib.parse.urlsplit(url).netloc.lower()
+    with _host_lock:
+        gate = _host_gates.get(host)
+        if gate is None:
+            gate = _host_gates[host] = threading.Semaphore(PER_HOST)
+    return gate
 
 
 class SourceError(Exception):
@@ -40,13 +55,15 @@ def _fetch(url: str, params: Optional[dict], data: Optional[dict],
     hdrs = {"User-Agent": USER_AGENT}
     hdrs.update(headers or {})
     last = "сбой сети"
+    gate = _gate(url)
     for attempt in range(RETRIES + 1):
         if attempt:
             _sleep(PAUSE * attempt)
         try:
             req = urllib.request.Request(url, data=body, headers=hdrs)
-            with _urlopen(req, timeout) as resp:
-                return resp.read()
+            with gate:
+                with _urlopen(req, timeout) as resp:
+                    return resp.read()
         except urllib.error.HTTPError as e:
             e.close()
             last = "сервис ответил ошибкой %d" % e.code

@@ -212,6 +212,38 @@ def word_forms(query: str) -> List[str]:
     return out
 
 
+MAX_BASE_FORMS = 3
+
+
+def _inflection(head: str, candidate: str) -> bool:
+    """True when the candidate is itself an inflected form, not a base of head.
+
+    `_single_forms` walks the irregular table both ways, so asking for the base
+    forms of `run` also offers `ran`, and asking for those of `drunk` offers its
+    brother `drank`. Neither is a base form of anything.
+    """
+    return (candidate in _IRREGULAR_BACK
+            and candidate not in _IRREGULAR_BACK.get(head, []))
+
+
+def base_form_candidates(word: str) -> List[str]:
+    """Shorter forms the word may have been inflected from, nearest first.
+
+    Only a guess: `tired` yields `tire`, which is a different word. The caller
+    labels what comes back and never silently treats it as the word itself.
+    """
+    words = normalize_query(word).lower().split()
+    if not words:
+        return []
+    head = words[0]
+    shorter = [
+        f for f in _dedupe(_single_forms(head))
+        if f != head and len(f) <= len(head) and len(f) >= 3 and not _inflection(head, f)
+    ]
+    shorter.sort(key=len, reverse=True)
+    return shorter[:MAX_BASE_FORMS]
+
+
 @dataclass
 class Occurrence:
     sentence_index: int
