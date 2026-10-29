@@ -438,6 +438,9 @@ class MainDialog(QDialog):
         while self.ch_roles.count():
             widget = self.ch_roles.takeAt(0).widget()
             if widget is not None:
+                # deleteLater alone leaves the button painted at its old place
+                # until the event loop spins: detach it from the row right now
+                widget.setParent(None)
                 widget.deleteLater()
         labels = st.role_labels() if st.needs_role() else []
         self.ch_roles_host.setVisible(bool(labels))

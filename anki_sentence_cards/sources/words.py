@@ -123,6 +123,8 @@ def collect_roles(word: str,
                 for role in out:
                     if role.lemma == accepted and not role.ipa:
                         role.ipa = found
+                # the base form only just got its transcription: pass it on
+                _fill_from_lemma(out)
     return WordData(out, shared)
 
 

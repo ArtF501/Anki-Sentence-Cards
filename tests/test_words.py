@@ -168,3 +168,19 @@ def test_lemma_transcription_never_crosses_to_another_part_of_speech():
 
     data = collect_roles("tired", [primary], candidates=["tire"])
     assert [(r.pos, r.ipa) for r in data.roles] == [("adjective", ""), ("noun", "taɪə")]
+
+
+def test_lemma_transcription_from_the_extra_lookup_also_fills_the_word():
+    """supervised: транскрипция supervise добыта отдельным запросом, и своя
+    verb-роль обязана её получить — иначе поле на карточке остаётся пустым."""
+    def primary(w):
+        if w == "supervised":
+            return WordData([Role("verb", "", "past participle of supervise", source="a"),
+                             Role("adjective", "", "done under supervision", source="a")])
+        return WordData([Role("verb", "", "To oversee and direct.", source="a")])
+
+    data = collect_roles("supervised", [primary], candidates=["supervise"],
+                         ipa_lookup=lambda w: "ˈsuː.pə.vaɪz" if w == "supervise" else "")
+    assert [(r.pos, r.ipa, r.lemma) for r in data.roles] == [
+        ("verb", "ˈsuː.pə.vaɪz", ""), ("adjective", "", ""),
+        ("verb", "ˈsuː.pə.vaɪz", "supervise")]
